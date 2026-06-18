@@ -25,9 +25,11 @@ const AUTO_REPAIRABLE_AGENT_IDS = new Set([
   "kiro-cli",
   "kimi-cli",
   "qwen-code",
+  "codewhale",
   "opencode",
   "hermes",
   "qoder",
+  "reasonix"
 ]);
 
 const INSTALLABLE_AGENT_IDS = new Set([
@@ -41,11 +43,13 @@ const INSTALLABLE_AGENT_IDS = new Set([
   "kiro-cli",
   "kimi-cli",
   "qwen-code",
+  "codewhale",
   "opencode",
   "pi",
   "openclaw",
   "hermes",
   "qoder",
+  "reasonix",
 ]);
 const SETTABLE_AGENT_FLAGS = AGENT_FLAGS.filter((flag) => flag !== "integrationInstalled");
 

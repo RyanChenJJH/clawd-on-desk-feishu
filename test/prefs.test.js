@@ -93,7 +93,7 @@ describe("prefs.getDefaults", () => {
       assert.strictEqual(d.agents[id].enabled, true, `${id} should default enabled`);
       assert.strictEqual(d.agents[id].integrationInstalled, true, `${id} should default installed`);
     }
-    for (const id of ["copilot-cli", "cursor-agent", "gemini-cli", "antigravity-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "opencode", "pi", "openclaw", "hermes", "qoder"]) {
+    for (const id of ["copilot-cli", "cursor-agent", "gemini-cli", "antigravity-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "pi", "openclaw", "hermes", "qoder"]) {
       assert.strictEqual(d.agents[id].enabled, false, `${id} should default disabled`);
       assert.strictEqual(d.agents[id].integrationInstalled, false, `${id} should default not installed`);
     }
@@ -109,7 +109,7 @@ describe("prefs.getDefaults", () => {
         `${id} should default permissionsEnabled`
       );
     }
-    for (const id of ["antigravity-cli", "pi", "openclaw", "qoder"]) {
+    for (const id of ["antigravity-cli", "codewhale", "pi", "openclaw", "qoder"]) {
       assert.strictEqual(
         d.agents[id].permissionsEnabled,
         false,
@@ -147,6 +147,14 @@ describe("prefs.getDefaults", () => {
     assert.strictEqual(d.agents.qoder.enabled, false);
     assert.strictEqual(d.agents.qoder.permissionsEnabled, false);
     assert.strictEqual(d.agents.qoder.notificationHookEnabled, true);
+  });
+
+  it("defaults CodeWhale permission bubbles off (state-only)", () => {
+    const d = prefs.getDefaults();
+    assert.strictEqual(d.agents.codewhale.integrationInstalled, false);
+    assert.strictEqual(d.agents.codewhale.enabled, false);
+    assert.strictEqual(d.agents.codewhale.permissionsEnabled, false);
+    assert.strictEqual(d.agents.codewhale.notificationHookEnabled, true);
   });
 
   it("defaults Pi permission bubbles off", () => {
@@ -610,7 +618,7 @@ describe("prefs.validate", () => {
 
   it("seeds all known agents with notificationHookEnabled=true", () => {
     const d = prefs.getDefaults();
-    for (const id of ["claude-code", "codex", "copilot-cli", "cursor-agent", "gemini-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "opencode", "pi", "openclaw", "hermes", "qoder"]) {
+    for (const id of ["claude-code", "codex", "copilot-cli", "cursor-agent", "gemini-cli", "codebuddy", "kiro-cli", "kimi-cli", "qwen-code", "codewhale", "opencode", "pi", "openclaw", "hermes", "qoder", "reasonix"]) {
       assert.strictEqual(
         d.agents[id].notificationHookEnabled,
         true,
@@ -1154,6 +1162,29 @@ describe("prefs.migrate v10 → v11 (on-demand agent integrations)", () => {
     }));
     assert.strictEqual(validated.agents["copilot-cli"].integrationInstalled, false);
     assert.strictEqual(validated.agents["copilot-cli"].enabled, false);
+  });
+});
+
+describe("prefs.migrate v11 → v12 (showDock default off for fresh installs)", () => {
+  it("backfills showDock=true for a pre-v12 file that lacks it (existing user keeps the Dock)", () => {
+    const validated = prefs.validate(prefs.migrate({ version: 11, lang: "en" }));
+    assert.strictEqual(validated.version, prefs.CURRENT_VERSION);
+    assert.strictEqual(validated.showDock, true);
+  });
+
+  it("preserves an explicit showDock=false from a pre-v12 file", () => {
+    const validated = prefs.validate(prefs.migrate({ version: 11, showDock: false }));
+    assert.strictEqual(validated.showDock, false);
+  });
+
+  it("fresh defaults (no prefs file, migrate never runs) get showDock off", () => {
+    const d = prefs.getDefaults();
+    assert.strictEqual(d.showDock, false);
+  });
+
+  it("is idempotent on v12 input (a fresh-install save is not re-backfilled)", () => {
+    const upgraded = prefs.migrate({ version: 12 });
+    assert.strictEqual("showDock" in upgraded, false);
   });
 });
 

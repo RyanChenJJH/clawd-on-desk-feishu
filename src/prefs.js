@@ -102,7 +102,13 @@ const SCHEMA = {
   // Pure data prefs
   lang: { type: "string", default: "en", enum: ["en", "zh", "zh-TW", "ko", "ja"] },
   showTray: { type: "boolean", default: true },
-  showDock: { type: "boolean", default: true },
+  // Default off (macOS): a fresh install runs as an accessory/agent app — pet +
+  // menu-bar icon, no Dock tile. Existing users keep their Dock — a persisted
+  // showDock is kept (save() bakes the full snapshot), and the v11->v12 migration
+  // backfills showDock=true for any pre-v12 file that lacks the key — so ONLY
+  // brand-new installs (which never run migrate) pick up this off default.
+  // showTray stays default-on so there is always one access point (menu bar).
+  showDock: { type: "boolean", default: false },
   manageClaudeHooksAutomatically: { type: "boolean", default: true },
   autoStartWithClaude: { type: "boolean", default: false },
   // System-backed: actual truth lives in OS login items / autostart files.
@@ -200,6 +206,8 @@ const SCHEMA = {
   // proportional pixel-size recomputation. The pet keeps its current
   // window size; the size slider still works (per-display proportional).
   keepSizeAcrossDisplays: { type: "boolean", default: false },
+  // Free roam: when enabled and the pet is idle, it will wander around the screen
+  freeRoam: { type: "boolean", default: false },
   // Text-window zoom (bubbles, HUD, dashboard, settings, resume input). The
   // pet itself scales via `size` and is never zoomed. `textScale` is the
   // global default; `textScaleByDisplay` overrides it per display id (the
@@ -243,12 +251,14 @@ const SCHEMA = {
       "kiro-cli": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       "kimi-cli": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       "qwen-code": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
+      "codewhale": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "opencode": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       "pi": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "openclaw": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
       "hermes": { integrationInstalled: false, enabled: false, permissionsEnabled: true, notificationHookEnabled: true },
       // Qoder is state-only (Phase 1) — permission bubbles default off.
       "qoder": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
+      "reasonix": { integrationInstalled: false, enabled: false, permissionsEnabled: false, notificationHookEnabled: true },
     }),
     normalize: normalizeAgents,
   },
@@ -593,10 +603,19 @@ function migrate(raw) {
     }
     out.version = 11;
   }
-  // v11 -> v12: Feishu remote approval settings. The feature is default-off;
-  // validate() fills the new object from schema defaults and credentials live
-  // outside prefs in userData/feishu-approval.env.
+  // v11 -> v12: two unrelated additions share this version bump.
+  // (a) Feishu remote approval settings — default-off; validate() fills the new
+  //     object from schema defaults; credentials live outside prefs in
+  //     userData/feishu-approval.env.
+  // (b) showDock now defaults OFF for FRESH INSTALLS ONLY (a new install runs as a
+  //     menu-bar/pet accessory with no Dock tile). Existing files normally carry
+  //     showDock explicitly (save() bakes the full snapshot), but a file from a
+  //     pre-showDock build or hand-trimmed by the user lacks it — without this
+  //     backfill validate() would hand those users the new off default and hide
+  //     their Dock. Pin the old on-default for every pre-v12 file; fresh installs
+  //     never run migrate().
   if (out.version < 12) {
+    if (!("showDock" in out)) out.showDock = true;
     out.version = 12;
   }
   if ((typeof out.version === "number" ? out.version : 0) < CURRENT_VERSION) {

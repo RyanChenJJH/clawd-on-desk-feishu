@@ -1,4 +1,71 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell, nativeImage, powerSaveBlocker, powerMonitor, clipboard } = require("electron");
+// ── Linux/Wayland: relaunch under XWayland so the pet is draggable (issue #441) ──
+// Native Wayland ignores client-side window positioning and blocks global cursor
+// queries, so the pet spawns centered, can't be dragged, and has no tracking;
+// --ozone-platform=x11 (XWayland) restores positioning + drag.
+//
+// This canNOT be done with app.commandLine.appendSwitch from here: Electron
+// selects AND instantiates the Ozone backend in C++ PreEarlyInitialization
+// (ui::SetOzonePlatformForLinuxIfNeeded + ui::OzonePlatform::PreEarlyInitialization),
+// which runs BEFORE this main script (PostEarlyInitialization → JoinAppCode) —
+// so any in-process switch change lands after the backend is already chosen.
+// SetOzonePlatformForLinuxIfNeeded DOES honor a --ozone-platform already on argv,
+// so the fix is to relaunch ourselves with that flag: this first process selects
+// Wayland but exits before creating any window; the second boots into XWayland.
+const { planXWaylandRelaunch } = require("./linux-ozone");
+const _xwaylandRelaunch = planXWaylandRelaunch({
+  platform: process.platform,
+  env: process.env,
+  argv: process.argv,
+});
+if (_xwaylandRelaunch) {
+  console.log(
+    "Clawd: Linux — relaunching under XWayland (--ozone-platform=x11) " +
+    "(issue #441; override with CLAWD_OZONE_PLATFORM=wayland|x11|auto)"
+  );
+  process.env.CLAWD_OZONE_RELAUNCHED = "1";
+  // Spawn the replacement ourselves instead of app.relaunch(). Electron's
+  // relauncher helper is a process run from the binary INSIDE the AppImage's
+  // FUSE mount, and it deliberately waits for this process to die before it
+  // execs the replacement — but our exit also kills the AppImage runtime,
+  // which IS the FUSE daemon, so the mount vanishes and the helper loses its
+  // own code pages and dies without ever launching anything (reproduced on a
+  // real Wayland compositor in CI: the helper outlives us by <1s, no child).
+  // spawn() avoids both traps: the exec happens NOW, while this process and
+  // its mount are still alive, and the exec target is the on-disk .AppImage
+  // (process.env.APPIMAGE) or real binary — never the doomed mount path.
+  // detached gives the child its own process group so it survives us;
+  // stdio "inherit" keeps its logs on the user's terminal (the relauncher
+  // piped them to /dev/null, which made field reports needlessly blind).
+  let _xwaylandChild = null;
+  try {
+    _xwaylandChild = require("child_process").spawn(
+      process.env.APPIMAGE || process.execPath,
+      _xwaylandRelaunch.args,
+      { detached: true, stdio: "inherit" },
+    );
+  } catch {
+    _xwaylandChild = null;
+  }
+  if (_xwaylandChild && typeof _xwaylandChild.on === "function") {
+    _xwaylandChild.on("error", (err) => {
+      console.error("Clawd: XWayland relaunch spawn error:", err && err.message ? err.message : err);
+    });
+  }
+  if (_xwaylandChild && typeof _xwaylandChild.pid === "number") {
+    _xwaylandChild.unref();
+    app.exit(0);
+    return; // throwaway first process — stop before loading the rest of main.js
+  }
+  // No pid ⇒ the spawn failed before creating a child. Do NOT exit into
+  // nothing — clear the sentinel and fall through to a normal (native Wayland)
+  // startup so the app still runs, just without drag (issue #441). The error
+  // listener above also prevents async exec failures (ENOENT/EACCES) from
+  // crashing this fallback path.
+  delete process.env.CLAWD_OZONE_RELAUNCHED;
+  console.error("Clawd: XWayland relaunch failed; continuing under native Wayland (issue #441).");
+}
+
 const { clampTextScale, scaleWidth, scaleHeight, resolveTextScaleForKey } = require("./text-scale");
 const path = require("path");
 const fs = require("fs");
@@ -15,7 +82,7 @@ const { registerSettingsIpc } = require("./settings-ipc");
 const createSettingsEffectRouter = require("./settings-effect-router");
 const { registerSessionIpc } = require("./session-ipc");
 const { registerPetInteractionIpc } = require("./pet-interaction-ipc");
-const { launchClaudeSession } = require("./launch-claude");
+const { launchClaudeSession, openTerminalAt } = require("./launch-claude");
 const { dialog: electronDialog } = require("electron");
 const initPermission = require("./permission");
 const { registerPermissionIpc } = initPermission;
@@ -78,7 +145,6 @@ const {
 const { focusCodexThreadTarget } = require("./session-focus-handoff");
 const { isSessionInProgress } = require("./state-session-snapshot");
 const { getAllAgents } = require("../agents/registry");
-
 // ── Autoplay policy: allow sound playback without user gesture ──
 // MUST be set before any BrowserWindow is created (before app.whenReady)
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
@@ -1217,6 +1283,8 @@ function getPendingPermissionFocusEntry(sessionId) {
   if (entry.cwd) focusEntry.cwd = entry.cwd;
   if (entry.agentPid) focusEntry.agentPid = entry.agentPid;
   if (entry.pidChain) focusEntry.pidChain = entry.pidChain;
+  if (entry.tmuxSocket) focusEntry.tmuxSocket = entry.tmuxSocket;
+  if (entry.tmuxClient) focusEntry.tmuxClient = entry.tmuxClient;
   if (entry.host) focusEntry.host = entry.host;
   if (entry.platform) focusEntry.platform = entry.platform;
   if (entry.model) focusEntry.model = entry.model;
@@ -1574,6 +1642,7 @@ const _tickCtx = {
   getObjRect,
   getHitRectScreen,
   getAssetPointerPayload,
+  get roam() { return _roam; },
 };
 const _tick = require("./tick")(_tickCtx);
 requestFastTick = (maxDelay) => _tick.scheduleSoon(maxDelay);
@@ -1602,6 +1671,8 @@ function focusTerminalSession(session, sessionId, requestSource) {
     cwd: session.cwd,
     editor: session.editor,
     pidChain: session.pidChain,
+    tmuxSocket: session.tmuxSocket,
+    tmuxClient: session.tmuxClient,
     ghosttyTerminalId: session.ghosttyTerminalId,
     sessionId: String(sessionId),
     agentId: session.agentId,
@@ -3161,6 +3232,7 @@ const SETTINGS_MIRROR_SETTERS = {
   soundMuted: (v) => { soundMuted = v; }, soundVolume: (v) => { soundVolume = v; }, lowPowerIdleMode: (v) => { lowPowerIdleMode = v; },
   keepAwakeWhileWorking: (v) => { keepAwakeWhileWorking = v; },
   allowEdgePinning: (v) => { allowEdgePinningCached = v; }, disableMiniMode: (v) => { disableMiniModeCached = v; }, keepSizeAcrossDisplays: (v) => { keepSizeAcrossDisplaysCached = v; },
+  freeRoam: (v) => { _roam.setEnabled(v); },
   textScale: (v) => { textScale = v; textScalePreview = null; },
   textScaleByDisplay: (v) => { textScaleByDisplay = v; textScalePreview = null; },
 };
@@ -3558,6 +3630,7 @@ function createWindow() {
     computeDragEndBounds: (virtualBounds, size) =>
       computeFinalDragBounds(virtualBounds, size, clampToScreenVisual),
     applyPetWindowBounds: (bounds) => applyPetWindowBounds(bounds),
+    flushRuntimeStateToPrefs: () => flushRuntimeStateToPrefs(),
     reassertWinTopmost: () => reassertWinTopmost(),
     scheduleHwndRecovery: () => scheduleHwndRecovery(),
     repositionFloatingBubbles: () => repositionFloatingBubbles(),
@@ -3571,6 +3644,9 @@ function createWindow() {
         _sessionHud.revealFromPet();
       }
     },
+    statPath: (p) => fs.promises.stat(p),
+    openTerminalAt: (dir) => openTerminalAt(dir),
+    dropLog: (message) => console.log(`Clawd: ${message}`),
   });
 
   registerPermissionIpc({
@@ -3704,6 +3780,37 @@ const _miniCtx = {
 const _mini = require("./mini")(_miniCtx);
 const { enterMiniMode, exitMiniMode, enterMiniViaMenu, miniPeekIn, miniPeekOut,
         checkMiniModeSnap, cancelMiniTransition, animateWindowX, animateWindowParabola } = _mini;
+
+// ── Free Roam — initialized here after state and mini modules ──
+const _roamCtx = {
+  get win() { return win; },
+  getPetWindowBounds,
+  applyPetWindowPosition,
+  syncHitWin: () => syncHitWin(),
+  repositionSessionHud: () => repositionSessionHud(),
+  repositionAnchoredSurfaces: () => repositionAnchoredFloatingSurfaces(),
+  repositionBubbles: () => repositionFloatingBubbles(),
+  get bubbleFollowPet() { return bubbleFollowPet; },
+  get pendingPermissions() { return pendingPermissions; },
+  getNearestWorkArea,
+  clampToScreenVisual,
+  getMiniMode: () => _mini.getMiniMode(),
+  getCurrentState: () => _state.getCurrentState(),
+  get miniTransitioning() { return _mini.getMiniTransitioning(); },
+  applyState: (state, svgOverride, opts) => _state.applyState(state, svgOverride, opts),
+  setState: (state, svgOverride, opts) => _state.setState(state, svgOverride, opts),
+};
+const _roam = require("./roam")(_roamCtx);
+
+// Free roam: initialize from prefs and react to toggle changes
+_roam.setEnabled(_settingsController.get("freeRoam") === true);
+try {
+  _settingsController.subscribeKey("freeRoam", (value) => {
+    _roam.setEnabled(value === true);
+  });
+} catch (err) {
+  console.warn("Clawd: freeRoam subscribeKey failed:", err && err.message);
+}
 
 // Convenience getters for mini state (used throughout main.js)
 Object.defineProperties(this || {}, {}); // no-op placeholder

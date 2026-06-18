@@ -156,11 +156,13 @@ const MANAGED_CLEANUP_AGENT_IDS = Object.freeze([
   "kiro-cli",
   "kimi-cli",
   "qwen-code",
+  "codewhale",
   "opencode",
   "pi",
   "openclaw",
   "hermes",
   "qoder",
+  "reasonix",
 ]);
 
 // ── updateRegistry ──
@@ -289,6 +291,7 @@ const updateRegistry = {
   detachedIdleStaleMs: requireIntegerInRange("detachedIdleStaleMs", 5_000, 300_000),
   allowEdgePinning: requireBoolean("allowEdgePinning"),
   disableMiniMode: requireBoolean("disableMiniMode"),
+  freeRoam: requireBoolean("freeRoam"),
   keepSizeAcrossDisplays: requireBoolean("keepSizeAcrossDisplays"),
   mobilePreviewEnabled: requireBoolean("mobilePreviewEnabled"),
 

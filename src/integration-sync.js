@@ -385,6 +385,36 @@ function createIntegrationSyncRuntime(options = {}) {
     }
   }
 
+  function syncCodewhaleHooks() {
+    try {
+      if (typeof ctx.syncCodewhaleHooksImpl === "function") return ctx.syncCodewhaleHooksImpl();
+      const { registerCodewhaleHooks } = require("../hooks/codewhale-install.js");
+      const result = registerCodewhaleHooks({ silent: true });
+      if (hasPositiveCount(result.added) || hasPositiveCount(result.updated)) {
+        console.log(`Clawd: synced CodeWhale hooks (added ${result.added}, updated ${result.updated})`);
+      }
+      return normalizeCountSyncResult(result, "CodeWhale", "codewhale-not-installed");
+    } catch (err) {
+      console.warn("Clawd: failed to sync CodeWhale hooks:", err.message);
+      return { status: "error", message: err && err.message ? err.message : "Failed to sync CodeWhale hooks" };
+    }
+  }
+
+  function syncReasonixHooks() {
+    try {
+      if (typeof ctx.syncReasonixHooksImpl === "function") return ctx.syncReasonixHooksImpl();
+      const { registerReasonixHooks } = require("../hooks/reasonix-install.js");
+      const result = registerReasonixHooks({ silent: true });
+      if (hasPositiveCount(result.added) || hasPositiveCount(result.updated)) {
+        console.log(`Clawd: synced Reasonix hooks (added ${result.added}, updated ${result.updated})`);
+      }
+      return normalizeCountSyncResult(result, "Reasonix", "reasonix-not-installed");
+    } catch (err) {
+      console.warn("Clawd: failed to sync Reasonix hooks:", err.message);
+      return { status: "error", message: err && err.message ? err.message : "Failed to sync Reasonix hooks" };
+    }
+  }
+
   const AGENT_INTEGRATION_SYNCERS = Object.freeze({
     "gemini-cli": syncGeminiHooks,
     "antigravity-cli": syncAntigravityHooks,
@@ -394,12 +424,14 @@ function createIntegrationSyncRuntime(options = {}) {
     "kiro-cli": syncKiroHooks,
     "kimi-cli": syncKimiHooks,
     "qwen-code": syncQwenHooks,
+    codewhale: syncCodewhaleHooks,
     codex: syncCodexHooks,
     opencode: syncOpencodePlugin,
     pi: syncPiExtension,
     openclaw: syncOpenClawPlugin,
     hermes: syncHermesPlugin,
     qoder: syncQoderHooks,
+    reasonix: syncReasonixHooks,
   });
 
   const AGENT_INTEGRATION_REPAIRERS = Object.freeze({
@@ -491,12 +523,14 @@ function createIntegrationSyncRuntime(options = {}) {
     syncKiroHooks,
     syncKimiHooks,
     syncQwenHooks,
+    syncCodewhaleHooks,
     syncCodexHooks,
     syncOpencodePlugin,
     syncPiExtension,
     syncOpenClawPlugin,
     syncHermesPlugin,
     syncQoderHooks,
+    syncReasonixHooks,
     repairCodexHooks,
     repairOpenClawPlugin,
     syncIntegrationForAgent,
