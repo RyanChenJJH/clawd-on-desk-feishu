@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
+  <!-- clawd health reminder: off work. clawd waves its right claw goodbye with a
+       happy bounce. ~4s loop. -->
+  <title>clawd health offwork</title>
+  <rect id="ground-shadow" x="3" y="15" width="9" height="1" fill="#000000" opacity="0.5">
+    <animate attributeName="width" dur="4s" repeatCount="indefinite"
+      keyTimes="0;0.25;0.5;0.75;1" values="9;9.6;9;9.6;9"/>
+    <animate attributeName="x" dur="4s" repeatCount="indefinite"
+      keyTimes="0;0.25;0.5;0.75;1" values="3;2.7;3;2.7;3"/>
+  </rect>
+  <g id="master">
+    <g id="char">
+      <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+        keyTimes="0;0.25;0.5;0.75;1" values="0 0;0 -0.8;0 0;0 -0.8;0 0"/>
+      <g id="body" fill="#DE886D">
+        <rect x="2" y="6" width="11" height="7"/>
+        <rect x="0" y="9" width="2" height="2"/>
+        <rect id="right-arm" x="13" y="9" width="2" height="2">
+          <animateTransform attributeName="transform" type="rotate" dur="4s" repeatCount="indefinite"
+            keyTimes="0;0.15;0.3;0.45;0.6;0.75;1" values="0 13 10;-35 13 10;-70 13 10;-35 13 10;-70 13 10;-15 13 10;0 13 10"/>
+        </rect>
+        <rect x="3" y="13" width="1" height="2"/>
+        <rect x="5" y="13" width="1" height="2"/>
+        <rect x="9" y="13" width="1" height="2"/>
+        <rect x="11" y="13" width="1" height="2"/>
+      </g>
+      <!-- happy curved eyes (^ ^) -->
+      <g id="eyes" fill="none" stroke="#000000" stroke-width="0.9" stroke-linecap="round">
+        <path d="M3.7 8.8 Q4.5 7.8 5.3 8.8"/>
+        <path d="M9.7 8.8 Q10.5 7.8 11.3 8.8"/>
+      </g>
+    </g>
+    <g id="wave-marks" stroke="#D97757" stroke-width="0.4" stroke-linecap="round" opacity="0">
+      <animate attributeName="opacity" dur="4s" repeatCount="indefinite" keyTimes="0;0.2;0.5;0.7;1" values="0;0.9;0.5;0.9;0"/>
+      <line x1="15.5" y1="2.5" x2="16.6" y2="2"/>
+      <line x1="15.8" y1="4" x2="17" y2="3.8"/>
+    </g>
+  </g>
+</svg>

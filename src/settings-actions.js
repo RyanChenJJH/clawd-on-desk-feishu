@@ -78,6 +78,9 @@ const {
   requireString,
   requirePlainObject,
 } = require("./settings-validators");
+const hrSettings = require("./health-reminder-settings");
+const hrPresets = require("./health-reminder/presets");
+const { recordEvent: hrRecordEvent, emptyStats: hrEmptyStats } = require("./health-reminder/stats");
 const {
   registerShortcut,
   resetShortcut,
@@ -126,6 +129,10 @@ const {
   validateTelegramApproval,
   validateTelegramBotToken,
 } = require("./telegram-approval-settings");
+const {
+  validateFeishuApproval,
+  validateFeishuCredentials,
+} = require("./feishu-approval-settings");
 const { EVENTS: TELEGRAM_MIGRATION_EVENTS } = require("./telegram-migration-state");
 const {
   validateHardwareBuddySettings,
@@ -396,6 +403,11 @@ const updateRegistry = {
   // ── Phase 2/3 placeholders — schema reserves these so applyUpdate accepts them ──
   agents: requirePlainObject("agents"),
   themeOverrides: requirePlainObject("themeOverrides"),
+  // Health Reminder config is committed by the healthReminder.* commands; the
+  // controller re-validates every committed key against this registry, so the
+  // key MUST be present here (object shape — deep sanitization is the prefs
+  // normalize's job). Without it, commits fail "unknown settings key healthReminder".
+  healthReminder: requirePlainObject("healthReminder"),
   sessionAliases(value, deps = {}) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return { status: "error", message: "sessionAliases must be a plain object" };
@@ -435,6 +447,9 @@ const updateRegistry = {
   },
   tgApproval(value) {
     return validateTelegramApproval(value);
+  },
+  feishuApproval(value) {
+    return validateFeishuApproval(value);
   },
 
   // v0.9.0 spike: persisted migration state across restarts. Shape:
@@ -1083,6 +1098,63 @@ function telegramApprovalTokenInfo(_payload, deps = {}) {
   };
 }
 
+async function feishuApprovalSetCredentials(payload, deps = {}) {
+  const src = payload && typeof payload === "object" ? payload : {};
+  const valid = validateFeishuCredentials({
+    appId: src.appId,
+    appSecret: src.appSecret,
+  });
+  if (valid.status !== "ok") return valid;
+  if (!deps || typeof deps.writeFeishuApprovalCredentials !== "function") {
+    return { status: "error", message: "feishuApproval.setCredentials requires writeFeishuApprovalCredentials dep" };
+  }
+  const result = await deps.writeFeishuApprovalCredentials({
+    appId: valid.appId,
+    appSecret: valid.appSecret,
+  });
+  if (!result || result.status !== "ok") {
+    return result || { status: "error", message: "Feishu credentials write failed" };
+  }
+  return { status: "ok", credentialsStored: true };
+}
+
+async function feishuApprovalDeleteCredentialsFile(_payload, deps = {}) {
+  if (!deps || typeof deps.deleteFeishuApprovalCredentialsFile !== "function") {
+    return { status: "error", message: "feishuApproval.deleteCredentialsFile requires deleteFeishuApprovalCredentialsFile dep" };
+  }
+  const result = await deps.deleteFeishuApprovalCredentialsFile();
+  return result || { status: "error", message: "Feishu credentials file delete returned no result" };
+}
+
+function feishuApprovalStatus(_payload, deps = {}) {
+  if (!deps || typeof deps.getFeishuApprovalStatus !== "function") {
+    return { status: "error", message: "feishuApproval.status requires getFeishuApprovalStatus dep" };
+  }
+  const state = deps.getFeishuApprovalStatus();
+  return { status: "ok", state: state || { status: "stopped" } };
+}
+
+function feishuApprovalCredentialsInfo(_payload, deps = {}) {
+  if (!deps || typeof deps.getFeishuApprovalCredentialsInfo !== "function") {
+    return { status: "error", message: "feishuApproval.credentialsInfo requires getFeishuApprovalCredentialsInfo dep" };
+  }
+  const info = deps.getFeishuApprovalCredentialsInfo() || { configured: false, appId: "", maskedAppSecret: "" };
+  return {
+    status: "ok",
+    configured: info.configured === true,
+    appId: typeof info.appId === "string" ? info.appId : "",
+    maskedAppSecret: typeof info.maskedAppSecret === "string" ? info.maskedAppSecret : "",
+  };
+}
+
+async function feishuApprovalSendTest(_payload, deps = {}) {
+  if (!deps || typeof deps.sendFeishuApprovalTest !== "function") {
+    return { status: "error", message: "feishuApproval.test requires sendFeishuApprovalTest dep" };
+  }
+  const result = await deps.sendFeishuApprovalTest();
+  return result || { status: "error", message: "Feishu approval test returned no result" };
+}
+
 // v0.9.0 migration: native-vs-sidecar transport controller.
 // All telegramMigration.* commands lock on the same `tgApproval` domain as the
 // legacy approval commands so they can't race against token writes.
@@ -1243,6 +1315,9 @@ remoteSshMarkDeployed.lockKey = "remoteSsh";
 remoteSshMarkRemoteNode.lockKey = "remoteSsh";
 telegramApprovalSetToken.lockKey = "tgApproval";
 telegramApprovalSendTest.lockKey = "tgApproval";
+feishuApprovalSetCredentials.lockKey = "feishuApproval";
+feishuApprovalDeleteCredentialsFile.lockKey = "feishuApproval";
+feishuApprovalSendTest.lockKey = "feishuApproval";
 cleanupIntegrationsCommand.lockKey = "agentIntegration";
 
 const repairDoctorIssue = createRepairDoctorIssue({
@@ -1277,6 +1352,184 @@ function setTextScaleForDisplay(payload, deps) {
   delete prev[key];
   const next = normalizeTextScaleByDisplay({ [key]: value, ...prev });
   return { status: "ok", commit: { textScaleByDisplay: next } };
+}
+
+// ── Health Reminder commands (fork extension) ──
+// Pure snapshot -> { status, commit } transforms over the healthReminder config.
+// The runtime (timers/bubble) lives in health-reminder-main.js; testReminder is
+// the only entry needing an injected dep.
+
+function healthReminderAddReminder(payload, deps = {}) {
+  const def = payload && payload.reminder;
+  const validation = hrSettings.validateReminder(def);
+  if (!validation.ok) {
+    return { status: "error", message: "healthReminder.addReminder: " + validation.errors.join("; ") };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.addReminder(config, def) } };
+}
+
+function healthReminderUpdateReminder(payload, deps = {}) {
+  const id = payload && payload.id;
+  if (typeof id !== "string" || !id) {
+    return { status: "error", message: "healthReminder.updateReminder requires id" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  const existing = config.reminders.find((reminder) => reminder.id === id);
+  if (!existing) return { status: "error", message: "healthReminder.updateReminder: unknown id" };
+  const merged = { ...existing, ...(payload.patch || {}), id };
+  const validation = hrSettings.validateReminder(merged);
+  if (!validation.ok) {
+    return { status: "error", message: "healthReminder.updateReminder: " + validation.errors.join("; ") };
+  }
+  const { config: next } = hrSettings.updateReminder(config, id, payload.patch || {});
+  return { status: "ok", commit: { healthReminder: next } };
+}
+
+function healthReminderRemoveReminder(payload, deps = {}) {
+  const id = payload && payload.id;
+  if (typeof id !== "string" || !id) {
+    return { status: "error", message: "healthReminder.removeReminder requires id" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  const { removed, config: next } = hrSettings.removeReminder(config, id);
+  if (!removed) return { status: "ok", noop: true };
+  return { status: "ok", commit: { healthReminder: next } };
+}
+
+function healthReminderReorderReminders(payload, deps = {}) {
+  const config = hrSettings.readConfig(deps.snapshot);
+  const next = hrSettings.reorderReminders(config, payload && payload.orderedIds);
+  return { status: "ok", commit: { healthReminder: next } };
+}
+
+function healthReminderSetEnabled(payload, deps = {}) {
+  if (typeof (payload && payload.enabled) !== "boolean") {
+    return { status: "error", message: "healthReminder.setEnabled requires boolean enabled" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { enabled: payload.enabled }) } };
+}
+
+function healthReminderSetRespectDnd(payload, deps = {}) {
+  if (typeof (payload && payload.respectDnd) !== "boolean") {
+    return { status: "error", message: "healthReminder.setRespectDnd requires boolean respectDnd" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { respectDnd: payload.respectDnd }) } };
+}
+
+function healthReminderSetQuietHours(payload, deps = {}) {
+  const quietHours = payload && payload.quietHours;
+  if (!quietHours || typeof quietHours !== "object") {
+    return { status: "error", message: "healthReminder.setQuietHours requires quietHours object" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { quietHours }) } };
+}
+
+function healthReminderSetAutoCollapse(payload, deps = {}) {
+  const minutes = payload && payload.autoCollapseMinutes;
+  if (typeof minutes !== "number" || !Number.isFinite(minutes)) {
+    return { status: "error", message: "healthReminder.setAutoCollapse requires a finite number" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { autoCollapseMinutes: minutes }) } };
+}
+
+function healthReminderTestReminder(payload, deps = {}) {
+  if (typeof deps.triggerHealthReminderTest !== "function") {
+    return { status: "error", message: "healthReminder.testReminder requires triggerHealthReminderTest dep" };
+  }
+  return deps.triggerHealthReminderTest(payload && payload.id);
+}
+
+// One-click add from a built-in template (V2-P3).
+function healthReminderAddFromTemplate(payload, deps = {}) {
+  const def = hrPresets.buildFromPreset(payload && payload.templateId, payload && payload.lang);
+  if (!def) {
+    return { status: "error", message: "healthReminder.addFromTemplate: unknown templateId" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.addReminder(config, def) } };
+}
+
+// Read-only: return a portable reminder envelope for the caller to write to disk.
+function healthReminderExportReminders(payload, deps = {}) {
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", data: hrSettings.exportReminders(config) };
+}
+
+// Merge/replace a portable reminder set; rejects malformed/invalid input atomically.
+function healthReminderImportReminders(payload, deps = {}) {
+  const mode = payload && payload.mode === "replace" ? "replace" : "merge";
+  const config = hrSettings.readConfig(deps.snapshot);
+  const result = hrSettings.importReminders(config, payload && payload.data, { mode });
+  if (!result.ok) {
+    return { status: "error", message: "healthReminder.importReminders: " + result.error };
+  }
+  return { status: "ok", imported: result.imported, commit: { healthReminder: result.config } };
+}
+
+// Toggle the opt-in smart-scheduling flags (V2-P5). All default off.
+function healthReminderSetSmartOptions(payload, deps = {}) {
+  const patch = {};
+  for (const key of ["onlyWhenActive", "adaptiveInterval", "deferPastQuietHours", "reduceMotion"]) {
+    if (payload && typeof payload[key] === "boolean") patch[key] = payload[key];
+  }
+  if (Object.keys(patch).length === 0) {
+    return { status: "error", message: "healthReminder.setSmartOptions requires at least one boolean field" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, patch) } };
+}
+
+// Visible-stack cap (V2-P6); normalizeConfig clamps to [1,5].
+function healthReminderSetMaxVisibleBubbles(payload, deps = {}) {
+  const value = payload && payload.value;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return { status: "error", message: "healthReminder.setMaxVisibleBubbles requires a finite number" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { maxVisibleBubbles: value }) } };
+}
+
+// Display mode (v3): "followPet" | "corner". normalizeConfig coerces any other
+// value back to followPet, so no extra guard is needed here.
+function healthReminderSetDisplayMode(payload, deps = {}) {
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { displayMode: payload && payload.mode }) } };
+}
+
+// "Dismiss all" action (V2-P6): clears every open health bubble via the runtime.
+function healthReminderDismissAll(payload, deps = {}) {
+  if (typeof deps.dismissAllHealthReminders !== "function") {
+    return { status: "error", message: "healthReminder.dismissAll requires dismissAllHealthReminders dep" };
+  }
+  return deps.dismissAllHealthReminders();
+}
+
+// Opt-in local stats (V2-P7).
+function healthReminderSetStatsEnabled(payload, deps = {}) {
+  if (typeof (payload && payload.enabled) !== "boolean") {
+    return { status: "error", message: "healthReminder.setStatsEnabled requires boolean enabled" };
+  }
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { statsEnabled: payload.enabled }) } };
+}
+
+function healthReminderClearStats(payload, deps = {}) {
+  const config = hrSettings.readConfig(deps.snapshot);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { stats: hrEmptyStats() }) } };
+}
+
+// Increment a counter; a no-op (no commit) when stats are off, so a stale runtime
+// call can never start recording behind the user's back.
+function healthReminderRecordStat(payload, deps = {}) {
+  const config = hrSettings.readConfig(deps.snapshot);
+  if (!config.statsEnabled) return { status: "ok", noop: true };
+  const nextStats = hrRecordEvent(config.stats, payload && payload.type, payload && payload.id);
+  return { status: "ok", commit: { healthReminder: hrSettings.setFields(config, { stats: nextStats }) } };
 }
 
 const commandRegistry = {
@@ -1322,8 +1575,32 @@ const commandRegistry = {
   "telegramApproval.status": telegramApprovalStatus,
   "telegramApproval.tokenInfo": telegramApprovalTokenInfo,
   "telegramApproval.test": telegramApprovalSendTest,
+  "feishuApproval.setCredentials": feishuApprovalSetCredentials,
+  "feishuApproval.deleteCredentialsFile": feishuApprovalDeleteCredentialsFile,
+  "feishuApproval.status": feishuApprovalStatus,
+  "feishuApproval.credentialsInfo": feishuApprovalCredentialsInfo,
+  "feishuApproval.test": feishuApprovalSendTest,
   "telegramMigration.snapshot": telegramMigrationSnapshot,
   "telegramMigration.dispatch": telegramMigrationDispatch,
+  "healthReminder.addReminder": healthReminderAddReminder,
+  "healthReminder.updateReminder": healthReminderUpdateReminder,
+  "healthReminder.removeReminder": healthReminderRemoveReminder,
+  "healthReminder.reorderReminders": healthReminderReorderReminders,
+  "healthReminder.setEnabled": healthReminderSetEnabled,
+  "healthReminder.setRespectDnd": healthReminderSetRespectDnd,
+  "healthReminder.setQuietHours": healthReminderSetQuietHours,
+  "healthReminder.setAutoCollapse": healthReminderSetAutoCollapse,
+  "healthReminder.testReminder": healthReminderTestReminder,
+  "healthReminder.addFromTemplate": healthReminderAddFromTemplate,
+  "healthReminder.exportReminders": healthReminderExportReminders,
+  "healthReminder.importReminders": healthReminderImportReminders,
+  "healthReminder.setSmartOptions": healthReminderSetSmartOptions,
+  "healthReminder.setMaxVisibleBubbles": healthReminderSetMaxVisibleBubbles,
+  "healthReminder.setDisplayMode": healthReminderSetDisplayMode,
+  "healthReminder.dismissAll": healthReminderDismissAll,
+  "healthReminder.setStatsEnabled": healthReminderSetStatsEnabled,
+  "healthReminder.clearStats": healthReminderClearStats,
+  "healthReminder.recordStat": healthReminderRecordStat,
 };
 
 module.exports = {

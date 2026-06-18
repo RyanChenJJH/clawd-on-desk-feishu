@@ -60,6 +60,9 @@ function registerDoctorIpc({
   getPrefsSnapshot,
   getDoNotDisturb,
   getLocale,
+  getFeishuApprovalCredentialsStatus,
+  getFeishuApprovalStatus,
+  runDoctorChecks: runChecksImpl = runDoctorChecks,
 }) {
   let lastDoctorResult = null;
   let lastDoctorConnectionTest = null;
@@ -78,10 +81,16 @@ function registerDoctorIpc({
   );
 
   function buildDoctorResult() {
-    lastDoctorResult = runDoctorChecks({
+    lastDoctorResult = runChecksImpl({
       server,
       prefs: getPrefsSnapshot(),
       doNotDisturb: getDoNotDisturb(),
+      feishuCredentialsStatus: typeof getFeishuApprovalCredentialsStatus === "function"
+        ? getFeishuApprovalCredentialsStatus()
+        : null,
+      feishuApprovalStatus: typeof getFeishuApprovalStatus === "function"
+        ? getFeishuApprovalStatus()
+        : null,
     });
     return lastDoctorResult;
   }

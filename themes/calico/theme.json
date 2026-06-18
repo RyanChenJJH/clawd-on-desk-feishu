@@ -219,6 +219,18 @@
       "duration": 2500
     }
   },
+  "healthReminders": {
+    "drink": { "file": "calico-happy.apng", "duration": 4000 },
+    "stretch": { "file": "calico-yawning.apng", "duration": 4500 },
+    "eat": { "file": "calico-happy.apng", "duration": 4000 },
+    "offwork": { "file": "calico-react-left.apng", "duration": 4000 },
+    "eyerest": { "file": "calico-thinking.apng", "duration": 5000 },
+    "breathe": { "file": "calico-dozing.apng", "duration": 5000 },
+    "posture": { "file": "calico-idle.apng", "duration": 4000 },
+    "walk": { "file": "calico-working-carrying.apng", "duration": 4000 },
+    "snack": { "file": "calico-happy.apng", "duration": 4000 },
+    "sleeptime": { "file": "calico-sleeping.apng", "duration": 5000 }
+  },
   "miniMode": {
     "supported": true,
     "flipAssets": true,

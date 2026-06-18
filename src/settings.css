@@ -3417,6 +3417,73 @@ html, body {
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.feishu-approval-credentials-stored-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.feishu-approval-credentials-stored-row .row-text {
+  width: 100%;
+  min-width: 0;
+}
+.feishu-approval-credentials-stored-row .row-control {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  flex-shrink: 1;
+}
+.feishu-approval-credentials-stored-row .row-desc {
+  overflow-wrap: anywhere;
+}
+.feishu-approval-secret-masked {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+.feishu-approval-test-log-row {
+  align-items: stretch;
+}
+.feishu-approval-test-log {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel-bg));
+}
+.feishu-approval-test-log-title {
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.feishu-approval-test-log-line {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.feishu-approval-test-log-line + .feishu-approval-test-log-line {
+  margin-top: 5px;
+}
+.feishu-approval-test-log-level {
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.feishu-approval-test-log-info .feishu-approval-test-log-level {
+  color: var(--accent);
+}
+.feishu-approval-test-log-warn .feishu-approval-test-log-level,
+.feishu-approval-test-log-error .feishu-approval-test-log-level {
+  color: var(--toast-error);
+}
+.feishu-approval-test-log-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 /* Token-edit and recipient rows use vertical layout: the hint can be long
    (links + multi-sentence instructions), and the inline-form variant from
    earlier squeezed .row-text into a single-glyph column. */
@@ -3561,3 +3628,19 @@ html, body {
 .mobile-action-btn:hover { background: var(--accent); color: #fff; }
 .mobile-action-danger { border-color: var(--red, #7f1d1d); color: var(--red, #fca5a5); }
 .mobile-action-danger:hover { background: var(--red, #7f1d1d); color: #fff; }
+
+/* ── Health Reminder tab (fork extension) ── */
+.hr-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.hr-row-label { flex: 0 0 160px; font-size: 13px; opacity: 0.9; }
+.hr-inline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hr-list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.hr-card { border: 1px solid var(--border, rgba(127,127,127,0.25)); border-radius: 10px; padding: 10px 12px; }
+.hr-card-head { display: flex; align-items: center; gap: 10px; }
+.hr-card-title { display: flex; flex-direction: column; }
+.hr-card-name { font-size: 13.5px; font-weight: 600; }
+.hr-card-meta { font-size: 12px; opacity: 0.65; }
+.hr-card-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.hr-form { display: flex; flex-direction: column; gap: 4px; }
+.hr-form input, .hr-form select { padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border, rgba(127,127,127,0.35)); background: var(--input-bg, transparent); color: inherit; }
+.hr-days { display: flex; gap: 8px; flex-wrap: wrap; }
+.hr-day { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }

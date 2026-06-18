@@ -2,6 +2,10 @@
 
 [返回 README](../../README.zh-CN.md)
 
+## 飞书远程审批
+
+Clawd 可以把支持的权限气泡同步到飞书 / Lark 自建应用机器人，通过 SDK 长连接和交互卡片远程点 **Allow once / Deny**。该功能默认关闭、只做审批，不提供远程 shell、prompt 发送、完成通知或 Direct Send；它可以和 Telegram 同时启用，先作出的明确决定生效，本地桌面权限气泡仍然是 fallback。配置步骤和排障见 [feishu-approval.md](feishu-approval.md)。
+
 ## Agent 配置说明
 
 全新安装默认只安装并启用 Claude Code 和 Codex。其他本机 agent 需要先到 **Settings → Agents** 点该 agent 的 **Install / 安装**；安装且启用后，Clawd 才会在启动时继续同步对应 hook / plugin / extension。单独关闭 agent 只会停止事件入口，不会卸载文件；**Uninstall / 卸载** 只删除 Clawd 管理的 hook / plugin / extension 条目，并同时禁用该 agent。
@@ -166,6 +170,25 @@ node hooks/openclaw-install.js
 ```
 
 > 提示：如果仓库克隆在 WSL 内（如 `~/clawd-on-desk`），hook 脚本会自动使用 WSL 的 Node.js 路径。如果仓库放在 Windows 盘里（如 `/mnt/c/...`），请确保 WSL 的 PATH 中有 `node`。
+
+## 健康提醒（Health Reminder）
+
+桌面提醒喝水、久坐起身、午饭、下班、护眼等。打开 **设置 → 健康提醒**，开启总开关后新增提醒，
+为每条设置触发时间（固定时刻 / 循环间隔 / 按星期）、提醒文字与动画。
+
+- 提醒以**独立常驻气泡**显示，堆叠在任务气泡下方，**不会打断任务**；点「知道了」或「稍后再提醒」结算。
+- 宠物**身体动画仅在空闲时播放**（如 clawd 喝水）；任务进行时只显示文字气泡，回到空闲后再补播一次。
+- 可设**尊重勿扰(DND)**，并设**静默时段**（如 22:00–08:00）内不提醒。
+- 动画可在 **设置 → 动画/音效替换 → 健康提醒动画** 像「反应动画」那样替换或重置。
+- **v2 增强**（均默认安全）：
+  - **从模板添加**：喝水/久坐/护眼/深呼吸/番茄钟/午饭/下班/睡觉等一键添加；提醒集可 JSON 导入/导出（不含任何敏感信息）。
+  - **10 个动画键**：在 5 个基础动作上新增 breathe / posture / walk / snack / sleeptime（clawd 全套手绘；cloudling/calico 语义回退）。
+  - **每条提醒音 + 试听**（遵守勿扰/静音）。
+  - **更聪明的调度（默认关）**：仅在使用电脑时提醒、连续「稍后」自动延长间隔、静默时段错过顺延。
+  - **气泡**：可配「最多同时显示」(1–5)、一键「全部知道了」。
+  - **本地统计（默认关，opt-in）**：记录触发/知道了/稍后次数，可清空，**严格本地、绝不外发**。
+  - **减少动态**：开启后不播身体动画（气泡/文字仍显示）。
+- 默认关闭；未启用时无任何后台开销。设计与实现细节见 `docs/Expand_function/Health_Reminder/`（v2 见 `health-reminder-v2-phase1-8-log.md`）。
 
 ## Windows 说明
 

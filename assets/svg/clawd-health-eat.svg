@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
+  <!-- clawd health reminder: meal time. clawd holds a bowl and chews (head bob),
+       steam rising from the bowl. ~4s loop. -->
+  <title>clawd health eat</title>
+  <rect id="ground-shadow" x="3" y="15" width="9" height="1" fill="#000000" opacity="0.5"/>
+  <g id="master">
+    <g id="char">
+      <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+        keyTimes="0;0.15;0.3;0.45;0.6;0.75;1" values="0 0;0 0.5;0 0;0 0.5;0 0;0 0.4;0 0"/>
+      <g id="body" fill="#DE886D">
+        <rect x="2" y="6" width="11" height="7"/>
+        <rect id="left-arm" x="0" y="9" width="2" height="2">
+          <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+            keyTimes="0;0.2;0.8;1" values="0 0;2 1.5;2 1.5;0 0"/>
+        </rect>
+        <rect id="right-arm" x="13" y="9" width="2" height="2">
+          <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+            keyTimes="0;0.2;0.8;1" values="0 0;-2 1.5;-2 1.5;0 0"/>
+        </rect>
+        <rect x="3" y="13" width="1" height="2"/>
+        <rect x="5" y="13" width="1" height="2"/>
+        <rect x="9" y="13" width="1" height="2"/>
+        <rect x="11" y="13" width="1" height="2"/>
+      </g>
+      <g id="eyes" fill="#000000">
+        <rect x="4" y="8" width="1" height="2">
+          <animate attributeName="height" dur="4s" repeatCount="indefinite"
+            keyTimes="0;0.15;0.22;0.45;0.52;0.75;0.82;1" values="2;2;1;2;1;2;1;2"/>
+        </rect>
+        <rect x="10" y="8" width="1" height="2">
+          <animate attributeName="height" dur="4s" repeatCount="indefinite"
+            keyTimes="0;0.15;0.22;0.45;0.52;0.75;0.82;1" values="2;2;1;2;1;2;1;2"/>
+        </rect>
+      </g>
+    </g>
+    <g id="steam" stroke="#F4F4F6" stroke-width="0.35" stroke-linecap="round" fill="none" opacity="0.75">
+      <animate attributeName="opacity" dur="4s" repeatCount="indefinite" keyTimes="0;0.5;1" values="0.4;0.85;0.4"/>
+      <path d="M6 12.5 C5.5 11.9 6.6 11.3 6 10.6">
+        <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+          keyTimes="0;0.5;1" values="0 0;0.2 -0.6;0 0"/>
+      </path>
+      <path d="M9 12.5 C8.5 11.9 9.6 11.3 9 10.6">
+        <animateTransform attributeName="transform" type="translate" dur="4s" repeatCount="indefinite"
+          keyTimes="0;0.5;1" values="0 0;-0.2 -0.6;0 0"/>
+      </path>
+    </g>
+    <g id="bowl">
+      <path d="M4 12.4 H11 C10.7 14.2 9.4 15 7.5 15 C5.6 15 4.3 14.2 4 12.4 Z" fill="#D97757"/>
+      <rect x="3.6" y="12" width="7.8" height="0.8" rx="0.4" fill="#F0B59C"/>
+    </g>
+  </g>
+</svg>

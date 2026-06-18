@@ -32,6 +32,7 @@ describe("prefs.getDefaults", () => {
     assert.notStrictEqual(a.shortcuts, b.shortcuts);
     assert.notStrictEqual(a.sessionAliases, b.sessionAliases);
     assert.notStrictEqual(a.tgApproval, b.tgApproval);
+    assert.notStrictEqual(a.feishuApproval, b.feishuApproval);
     // Mutating one shouldn't affect the other
     a.agents["claude-code"].enabled = false;
     assert.strictEqual(b.agents["claude-code"].enabled, true);
@@ -70,6 +71,19 @@ describe("prefs.getDefaults", () => {
       notifyOnComplete: false,
       completionOutputMode: "off",
       r3DirectSendEnabled: false,
+    });
+    assert.deepStrictEqual(d.feishuApproval, {
+      enabled: false,
+      region: "feishu",
+      receiveIdType: "chat_id",
+      receiveId: "",
+      allowedOpenId: "",
+      allowedUserId: "",
+      recipients: [],
+      notifyOnComplete: false,
+      completionOutputMode: "off",
+      statusCommandEnabled: true,
+      elicitationEnabled: false,
     });
   });
 
@@ -299,6 +313,51 @@ describe("prefs.validate", () => {
       r3DirectSendEnabled: false,
     });
     assert.strictEqual(Object.prototype.hasOwnProperty.call(v.tgApproval, "botToken"), false);
+  });
+
+  it("normalizes Feishu approval prefs without storing app credentials", () => {
+    const v = prefs.validate({
+      feishuApproval: {
+        enabled: true,
+        region: " LARK ",
+        receiveIdType: " OPEN_ID ",
+        receiveId: " ou_target ",
+        allowedOpenId: " ou_allowed ",
+        allowedUserId: " u_allowed ",
+        recipients: [{
+          receiveIdType: "chat_id",
+          receiveId: " oc_extra ",
+          allowedOpenId: " ou_extra ",
+          allowedUserId: "",
+          appSecret: "must-not-survive",
+        }],
+        notifyOnComplete: true,
+        completionOutputMode: "full",
+        statusCommandEnabled: false,
+        appId: "cli_should-not-survive",
+        appSecret: "secret-should-not-survive",
+      },
+    });
+    assert.deepStrictEqual(v.feishuApproval, {
+      enabled: true,
+      region: "lark",
+      receiveIdType: "open_id",
+      receiveId: "ou_target",
+      allowedOpenId: "ou_allowed",
+      allowedUserId: "u_allowed",
+      recipients: [{
+        receiveIdType: "chat_id",
+        receiveId: "oc_extra",
+        allowedOpenId: "ou_extra",
+        allowedUserId: "",
+      }],
+      notifyOnComplete: true,
+      completionOutputMode: "full",
+      statusCommandEnabled: false,
+      elicitationEnabled: false,
+    });
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(v.feishuApproval, "appId"), false);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(v.feishuApproval, "appSecret"), false);
   });
 
   it("keeps valid fields verbatim", () => {

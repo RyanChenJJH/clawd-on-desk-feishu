@@ -45,6 +45,15 @@ bot, so you can Allow or Deny from Telegram while the local desktop bubble
 remains available. See [telegram-approval.md](telegram-approval.md) for setup,
 token ownership, supported agents, and fallback behavior.
 
+## Feishu / Lark Approval
+
+Clawd can also mirror supported permission bubbles to a Feishu or Lark
+self-built app bot over SDK long connection and interactive cards. It is
+disabled by default, approval-only, and can run alongside Telegram; the first
+explicit Allow once or Deny decision wins while the local desktop bubble remains
+the fallback. See [feishu-approval.md](feishu-approval.md) for app setup,
+recipient ids, Send test, and troubleshooting.
+
 ## Remote SSH (Claude Code, Codex CLI & Copilot CLI)
 
 <img src="../../assets/screenshot-remote-ssh.png" width="560" alt="Remote SSH — permission bubble from Raspberry Pi">
@@ -182,6 +191,30 @@ node hooks/openclaw-install.js
 ```
 
 > **Tip:** If the repo is cloned inside WSL (e.g. `~/clawd-on-desk`), hook scripts will automatically use WSL's Node.js path. If the repo is on a Windows drive (e.g. `/mnt/c/...`), make sure `node` is in WSL's `PATH`.
+
+## Health Reminder
+
+Desktop nudges for drinking water, standing up, lunch, off-work, eye rest, and more. Open
+**Settings → Health Reminder**, turn the master switch on, then add reminders — each with a
+trigger (fixed time / repeating interval / weekday filter), a message, and an animation.
+
+- Reminders appear as an **independent, persistent bubble** stacked below the task bubble and
+  **never interrupt a task**; dismiss with "Got it" or "Later" (snooze, default +10 min).
+- The **pet body animation plays only while idle** (e.g. clawd drinking water); during a task only
+  the text bubble shows, and the body animation replays once when the pet returns to idle.
+- Optionally **respect Do Not Disturb** and set a **quiet-hours** window (e.g. 22:00–08:00).
+- Animations are replaceable under **Settings → Animation/Sound Replacement → Health Reminders**,
+  exactly like reaction animations.
+- **v2 enhancements** (all safe-by-default):
+  - **Add from template** (water / sit / eye-rest / breathing / pomodoro / lunch / off-work / bedtime); reminder sets import/export as JSON (no sensitive data).
+  - **10 animation keys**: the 5 base actions plus breathe / posture / walk / snack / sleeptime (clawd hand-drawn; cloudling/calico semantic fallback).
+  - **Per-reminder sound + preview** (honours DND / mute).
+  - **Smarter scheduling (off by default)**: remind only when active, stretch the interval after repeated snoozes, defer misses past quiet hours.
+  - **Bubbles**: configurable max-shown (1–5) and one-click "dismiss all".
+  - **Local stats (opt-in, off by default)**: fired / confirmed / snoozed counts, clearable, **strictly local — never sent anywhere**.
+  - **Reduce motion**: suppresses the body animation (bubble/text still show).
+- Off by default with zero background cost when disabled. Design + implementation details live in
+  `docs/Expand_function/Health_Reminder/` (v2: `health-reminder-v2-phase1-8-log.md`).
 
 ## Windows Notes
 

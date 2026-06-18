@@ -243,6 +243,53 @@ describe("updateRegistry pure-data validators", () => {
     }, deps).status, "error");
   });
 
+  it("feishuApproval validates the settings object while allowing incomplete saved config", () => {
+    const deps = { snapshot: baseSnapshot };
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: false,
+      region: "feishu",
+      receiveIdType: "chat_id",
+      receiveId: "",
+      allowedOpenId: "",
+      allowedUserId: "",
+      notifyOnComplete: false,
+    }, deps).status, "ok");
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: true,
+      region: "lark",
+      receiveIdType: "open_id",
+      receiveId: "ou_target",
+      allowedOpenId: "ou_allowed",
+      allowedUserId: "",
+      notifyOnComplete: true,
+      completionOutputMode: "full",
+      statusCommandEnabled: false,
+    }, deps).status, "ok");
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: true,
+      region: "global",
+      receiveIdType: "chat_id",
+    }, deps).status, "error");
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: true,
+      region: "feishu",
+      receiveIdType: "chat_id",
+      appSecret: "must-not-save",
+    }, deps).status, "error");
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: true,
+      region: "feishu",
+      receiveIdType: "chat_id",
+      completionOutputMode: "summary",
+    }, deps).status, "error");
+    assert.strictEqual(updateRegistry.feishuApproval({
+      enabled: true,
+      region: "feishu",
+      receiveIdType: "chat_id",
+      statusCommandEnabled: "yes",
+    }, deps).status, "error");
+  });
+
   it("hardwareBuddy accepts only the normalized product settings shape", () => {
     assert.strictEqual(updateRegistry.hardwareBuddy({
       enabled: true,
@@ -558,6 +605,68 @@ describe("telegram approval commands", () => {
     assert.strictEqual(blocked.status, "error");
     assert.strictEqual(blocked.errorCode, "EVENT_NOT_ALLOWED");
     assert.deepStrictEqual(calls, [{ type: "USER_TEST_NATIVE" }]);
+  });
+});
+
+describe("feishu approval commands", () => {
+  it("feishuApproval.setCredentials validates credentials and delegates storage without returning the secret", async () => {
+    const calls = [];
+    const result = await commandRegistry["feishuApproval.setCredentials"]({
+      appId: "cli_a123456789",
+      appSecret: "secret-value-123456",
+    }, {
+      writeFeishuApprovalCredentials: async (value) => {
+        calls.push(value);
+        return { status: "ok", credentialsStored: true };
+      },
+    });
+
+    assert.deepStrictEqual(calls, [{
+      appId: "cli_a123456789",
+      appSecret: "secret-value-123456",
+    }]);
+    assert.deepStrictEqual(result, { status: "ok", credentialsStored: true });
+    assert.equal(JSON.stringify(result).includes("secret-value-123456"), false);
+
+    const bad = await commandRegistry["feishuApproval.setCredentials"]({
+      appId: "not-cli",
+      appSecret: "secret-value-123456",
+    }, {
+      writeFeishuApprovalCredentials: () => {
+        throw new Error("should not write invalid credentials");
+      },
+    });
+    assert.strictEqual(bad.status, "error");
+  });
+
+  it("feishuApproval.status, credentialsInfo, deleteCredentialsFile, and test proxy injected helpers", async () => {
+    assert.deepStrictEqual(await commandRegistry["feishuApproval.status"](null, {
+      getFeishuApprovalStatus: () => ({ status: "ready" }),
+    }), {
+      status: "ok",
+      state: { status: "ready" },
+    });
+
+    assert.deepStrictEqual(await commandRegistry["feishuApproval.credentialsInfo"](null, {
+      getFeishuApprovalCredentialsInfo: () => ({
+        configured: true,
+        appId: "cli_a123456789",
+        maskedAppSecret: "secr...3456",
+      }),
+    }), {
+      status: "ok",
+      configured: true,
+      appId: "cli_a123456789",
+      maskedAppSecret: "secr...3456",
+    });
+
+    assert.deepStrictEqual(await commandRegistry["feishuApproval.deleteCredentialsFile"](null, {
+      deleteFeishuApprovalCredentialsFile: async () => ({ status: "ok", deleted: true }),
+    }), { status: "ok", deleted: true });
+
+    assert.deepStrictEqual(await commandRegistry["feishuApproval.test"](null, {
+      sendFeishuApprovalTest: async () => ({ status: "error", message: "not implemented" }),
+    }), { status: "error", message: "not implemented" });
   });
 });
 

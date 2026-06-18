@@ -20,12 +20,18 @@ const fs = require("fs");
 const path = require("path");
 const { isPlainObject } = require("./theme-loader");
 const { normalizeShortcuts, getDefaultShortcuts } = require("./shortcut-actions");
+// Health reminder config normalize (pure logic; no Electron — keeps prefs pure).
+const { normalizeConfig: normalizeHealthReminderConfig } = require("./health-reminder/reminder-model");
 const { isValidDisplaySnapshot } = require("./work-area");
 const { normalizeRemoteSsh, getDefaults: getRemoteSshDefaults } = require("./remote-ssh-profile");
 const {
   cloneDefaultTelegramApproval,
   normalizeTelegramApproval,
 } = require("./telegram-approval-settings");
+const {
+  cloneDefaultFeishuApproval,
+  normalizeFeishuApproval,
+} = require("./feishu-approval-settings");
 const {
   DEFAULT_HARDWARE_BUDDY_SETTINGS,
   normalizeHardwareBuddySettings,
@@ -44,7 +50,7 @@ const {
   normalizeTextScaleByDisplay,
 } = require("./text-scale");
 
-const CURRENT_VERSION = 11;
+const CURRENT_VERSION = 12;
 const DEFAULT_INTEGRATION_INSTALLED_IDS = Object.freeze(["claude-code", "codex"]);
 const DEFAULT_INTEGRATION_INSTALLED_SET = new Set(DEFAULT_INTEGRATION_INSTALLED_IDS);
 
@@ -286,6 +292,19 @@ const SCHEMA = {
     type: "object",
     defaultFactory: () => cloneDefaultTelegramApproval(),
     normalize: normalizeTelegramApproval,
+  },
+  feishuApproval: {
+    type: "object",
+    defaultFactory: () => cloneDefaultFeishuApproval(),
+    normalize: normalizeFeishuApproval,
+  },
+  // Health Reminder config (fork extension). Data only — the runtime lives in
+  // health-reminder-main.js. Master switch defaults off so an unconfigured
+  // install behaves exactly like upstream.
+  healthReminder: {
+    type: "object",
+    defaultFactory: () => normalizeHealthReminderConfig({}),
+    normalize: (value) => normalizeHealthReminderConfig(value),
   },
   // v0.9.0 migration state. transport defaults to null (undecided) so v0.8.x
   // users upgrading without this key fall onto the "detect legacy artefacts"
@@ -574,6 +593,12 @@ function migrate(raw) {
     }
     out.version = 11;
   }
+  // v11 -> v12: Feishu remote approval settings. The feature is default-off;
+  // validate() fills the new object from schema defaults and credentials live
+  // outside prefs in userData/feishu-approval.env.
+  if (out.version < 12) {
+    out.version = 12;
+  }
   if ((typeof out.version === "number" ? out.version : 0) < CURRENT_VERSION) {
     out.version = CURRENT_VERSION;
   }
@@ -717,6 +742,21 @@ function normalizeReactionOverridesMap(value) {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+// Health reminder animation overrides are keyed by animation key (drink,
+// stretch, ...). Unlike reactions we allow any non-empty string key so v2 can
+// add animation keys without a prefs change. Health animations have a duration,
+// so durationMs is kept.
+function normalizeHealthReminderOverridesMap(value) {
+  if (!isPlainObject(value)) return null;
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof key !== "string" || !key) continue;
+    const cleanEntry = normalizeSlotOverride(entry, { allowDisabled: false });
+    if (cleanEntry && Object.keys(cleanEntry).length > 0) out[key] = cleanEntry;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function normalizeStateOverridesMap(value) {
   if (!isPlainObject(value)) return null;
   const out = {};
@@ -801,7 +841,7 @@ function normalizeThemeOverrides(value, defaultsValue) {
     // Back-compat: older prefs wrote state entries directly under themeId.
     const legacyStates = {};
     for (const [key, entry] of Object.entries(themeMap)) {
-      if (key === "states" || key === "tiers" || key === "timings" || key === "idleAnimations" || key === "reactions" || key === "hitbox" || key === "sounds") continue;
+      if (key === "states" || key === "tiers" || key === "timings" || key === "idleAnimations" || key === "reactions" || key === "healthReminders" || key === "hitbox" || key === "sounds") continue;
       const cleanEntry = normalizeSlotOverride(entry, { allowDisabled: true });
       if (cleanEntry) legacyStates[key] = cleanEntry;
     }
@@ -833,6 +873,9 @@ function normalizeThemeOverrides(value, defaultsValue) {
 
     const reactions = normalizeReactionOverridesMap(themeMap.reactions);
     if (reactions) cleanThemeMap.reactions = reactions;
+
+    const healthReminders = normalizeHealthReminderOverridesMap(themeMap.healthReminders);
+    if (healthReminders) cleanThemeMap.healthReminders = healthReminders;
 
     const hitbox = normalizeHitboxOverrides(themeMap.hitbox);
     if (hitbox) cleanThemeMap.hitbox = hitbox;

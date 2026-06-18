@@ -258,6 +258,17 @@ function startRemoteApproval(ctx, permEntry) {
   }
 }
 
+// v3: opt-in path to answer AskUserQuestion in Feishu. No-op unless an
+// elicitation provider is configured (feishuApproval.elicitationEnabled).
+function startRemoteElicitation(ctx, permEntry) {
+  if (typeof ctx.maybeStartRemoteElicitation !== "function") return;
+  try {
+    ctx.maybeStartRemoteElicitation(permEntry);
+  } catch (err) {
+    ctx.permLog(`remote elicitation start failed: ${err && err.message ? err.message : err}`);
+  }
+}
+
 function addPendingPermission(ctx, permEntry) {
   if (typeof ctx.addPendingPermission === "function") {
     return ctx.addPendingPermission(permEntry);
@@ -1058,6 +1069,9 @@ function handlePermissionPost(req, res, options) {
         recordRequestHookEvent.accepted();
         try {
           ctx.showPermissionBubble(permEntry);
+          // v3: also offer the question in Feishu (opt-in). The local bubble
+          // stays authoritative; whichever answers first aborts the other.
+          startRemoteElicitation(ctx, permEntry);
         } catch (bubbleErr) {
           ctx.permLog(`elicitation bubble failed: ${bubbleErr && bubbleErr.message} -> terminal fallback`);
           removePendingPermission(ctx, permEntry, "elicitation-bubble-failed");
