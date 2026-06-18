@@ -55,6 +55,10 @@ docs/**
 !docs/releases/release-v0.9.0.md
 !docs/releases/release-v0.10.0.md
 
+# Upstream-merge planning & log docs (this fork)
+!docs/update_combine/
+!docs/update_combine/**
+
 # Temp files from testing
 .tmp_*
 .tmp-*
