@@ -289,3 +289,61 @@ test("startRemoteApprovalFanout reports not started when no provider can run", (
   assert.equal(handle.providerCount, 0);
   assert.doesNotThrow(() => handle.abort());
 });
+
+// v4 (Feishu all-tools coverage): providers can require an explicit,
+// agent-supplied summary. Synthesized summaries (Clawd-built for tools without
+// description/summary/reason) are withheld from such providers (Telegram) but
+// still sent to lenient ones (Feishu). This is how "broaden Feishu only" is
+// expressed without a provider branch in the shared path.
+test("withholds synthesized summaries from providers that require an explicit one", () => {
+  const strict = {
+    ...makeClient("telegram", Promise.resolve(null)),
+    capabilities: { requiresExplicitSummary: true },
+  };
+  const lenient = makeClient("feishu", Promise.resolve(null));
+
+  const handle = startRemoteApprovalFanout({
+    clients: [strict, lenient],
+    payload: { title: "x", detail: "y", summarySource: "synthesized" },
+    normalizeDecision: normalize,
+    onDecision: () => {},
+  });
+
+  assert.equal(strict.calls.length, 0);   // Telegram withheld
+  assert.equal(lenient.calls.length, 1);  // Feishu still sent
+  assert.equal(handle.providerCount, 1);
+  assert.equal(handle.started, true);
+});
+
+test("explicit summaries go to all providers including strict ones", () => {
+  const strict = {
+    ...makeClient("telegram", Promise.resolve(null)),
+    capabilities: { requiresExplicitSummary: true },
+  };
+  const lenient = makeClient("feishu", Promise.resolve(null));
+
+  startRemoteApprovalFanout({
+    clients: [strict, lenient],
+    payload: { title: "x", detail: "y", summarySource: "explicit" },
+    normalizeDecision: normalize,
+    onDecision: () => {},
+  });
+
+  assert.equal(strict.calls.length, 1);
+  assert.equal(lenient.calls.length, 1);
+});
+
+test("a strict-only fanout with a synthesized summary reports not started", () => {
+  const strict = {
+    ...makeClient("telegram", Promise.resolve(null)),
+    capabilities: { requiresExplicitSummary: true },
+  };
+  const handle = startRemoteApprovalFanout({
+    clients: [strict],
+    payload: { title: "x", detail: "y", summarySource: "synthesized" },
+    normalizeDecision: normalize,
+    onDecision: () => { throw new Error("must not run"); },
+  });
+  assert.equal(handle.started, false);
+  assert.equal(handle.providerCount, 0);
+});
