@@ -22,6 +22,9 @@
   <a href="https://github.com/rullerzhou-afk/clawd-on-desk/stargazers"><img src="https://img.shields.io/github/stars/rullerzhou-afk/clawd-on-desk?style=flat&logo=github&color=yellow" alt="Stars"></a>
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge-flat.svg" alt="Mentioned in Awesome Claude Code"></a>
 </p>
+<p align="center">
+  <sub>🍴 A community fork — <b><a href="https://github.com/RyanChenJJH/clawd-on-desk-feishu">clawd-on-desk-feishu</a></b> — of <a href="https://github.com/rullerzhou-afk/clawd-on-desk">Clawd on Desk</a> by 鹿鹿 (<a href="https://github.com/rullerzhou-afk">@rullerzhou-afk</a>) &amp; contributors. All credit for the original project goes to them; this fork only <b>adds</b> optional, default-off features (Health Reminder + Feishu Remote Approval — see below) and stays in sync with upstream (currently <b>v0.10.0</b>).</sub>
+</p>
 
 <p align="center">
   <img src="assets/hero.gif" alt="Clawd on Desk — a pixel desktop pet that reacts to your AI coding agent in real time. Animated demo: the crab cycles through sleeping, thinking while the model reads the codebase, typing as edit/bash tools run, grooving for one subagent, juggling when multiple subagents run, raising a permission bubble, and celebrating when 14 files / 312 tests are complete. Works with Claude Code, Codex, Cursor, Copilot, Gemini, Antigravity, Qwen, CodeWhale, Pi, OpenClaw and more.">
@@ -32,6 +35,15 @@ Clawd lives on your desktop and reacts to what your AI coding agent is doing —
 Thinking when you prompt, typing when tools run, grooving or juggling for subagents, reviewing permissions, celebrating when tasks complete, sleeping when you step away. Ships with three built-in themes: **Clawd** (pixel crab), **Calico** (三花猫), and **Cloudling** (云宝), with full support for custom themes and imported Codex Pet animation packs.
 
 > Supports Windows 11, macOS, and Ubuntu/Linux. Windows releases provide separate x64 and ARM64 installers. Source builds require Node.js. Works with **Claude Code**, **Codex CLI**, **Copilot CLI**, **Gemini CLI**, **Antigravity CLI (agy)**, **Cursor Agent**, **CodeBuddy**, **Kiro CLI**, **Kimi Code CLI (Kimi-CLI)**, **Qwen Code**, **CodeWhale**, **opencode**, **Pi**, **OpenClaw**, **Hermes Agent**, **Qoder**, and **Reasonix CLI**.
+
+## Fork Additions (Expand_function)
+
+> The features in this section are **added by this fork** ([clawd-on-desk-feishu](https://github.com/RyanChenJJH/clawd-on-desk-feishu)) on top of the original [Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk) by 鹿鹿 ([@rullerzhou-afk](https://github.com/rullerzhou-afk)). Everything here is **modular, optional, and default-off** — with these turned off, Clawd behaves exactly like upstream. This fork periodically merges the original author's updates; the latest upstream-merge record lives in [`docs/update_combine/`](docs/update_combine/).
+
+- **🧋 Health Reminder (健康提醒)** — schedule gentle health reminders (drink water, stand up, stretch, eye-rest, lunch, off-work…), each with its own persistent, interactive bubble and a matching pet animation. Includes a preset library with JSON import/export, quiet-hours / DND awareness, idle-aware "smart" scheduling, per-reminder sound, and a dedicated **Settings → Health Reminder** tab. Default-off.
+- **✈️ Feishu / Lark Remote Approval (飞书远程审批)** — mirror the permission-approval flow to Feishu (Lark). When a supported agent requests a tool permission, an interactive card is sent to authorized approver(s) who can **Allow / Deny** — or even answer an `AskUserQuestion` — directly from Feishu, with the result synced back to the desktop. Built as a provider alongside the existing Telegram path under `src/remote-approval/`; credentials stay on your machine; default-off.
+
+> These additions follow the original project's structure and license and are designed to stay easy to merge with upstream. The Clawd character and all bundled artwork remain the property of their respective authors — see [License](#license).
 
 ## Features
 

@@ -1,13 +1,13 @@
 ## v0.9.0
 
-v0.9.0 is a milestone release built around three larger pieces of work: a ground-up
-rework of Telegram remote approval into a native Node bot, a brand-new read-only
-mobile companion over LAN, and Hermes Agent clarify / permission-bubble groundwork
-— plus the usual round of Codex / opencode / macOS hardening.
+v0.9.0 is a milestone release built around remote approval work, a brand-new
+read-only mobile companion over LAN, and Hermes Agent clarify / permission-bubble
+groundwork - plus the usual round of Codex / opencode / macOS hardening.
 
 ### New Features
 
 - **Telegram remote approval — native Node bot rework** (#354, #369, #390, #393) - Clawd's Telegram remote approval moves from the bundled Go `cc-connect-clawd` sidecar to a native Node bot. The migration follows a compatibility-first path: the legacy sidecar stays shipped and keeps working, new installs default to the native setup, and existing users switch only when they explicitly tap **"Test native and switch"**. A runtime owner manager guarantees that the sidecar and the native bot never long-poll the same bot token at once (Telegram allows only one `getUpdates` consumer, otherwise 409 Conflict). Native mode unlocks two things legacy never had: **rich approval** (Always allow / one-time approval and `permission_suggestions` buttons) and **completion notifications**.
+- **Feishu / Lark remote approval (v1, opt-in)** - Clawd can now mirror supported permission bubbles to a self-built Feishu or Lark app bot over SDK long connection and interactive cards. The first version is deliberately narrow: disabled by default, Allow once / Deny only, no remote shell, no prompt submission, no completion notification, no Direct Send, and no Feishu Approval API workflow. It can run alongside Telegram and the desktop bubble; the first explicit decision wins and local fallback remains intact.
 - **Telegram completion notifications (R1a)** (#369) - When a session finishes, the native bot can send a completion notification to Telegram. This is **native-only**, **off by default**, and tied to the approval switch — turning Telegram approval off also stops notifications, so there is no orphaned toggle that keeps messaging after you think you turned it off. `completionOutputMode` controls whether the message includes the assistant's final text (`full`) or sends no completion output (`off`, the default).
 - **Telegram R3 Direct Send (beta, opt-in, Windows-first)** (#390, #393) - Reply to a completion notification from Telegram and Clawd resolves the matching local session, focuses its terminal, and pastes a one-line next prompt into it. This is an **opt-in beta** (`tgApproval.r3DirectSendEnabled`, default off). It deliberately **does not auto-press Enter** — text is pasted and you press Enter locally — and it only delivers after a positive focus confirmation; anything ambiguous falls back to copying the text to the clipboard with a Telegram acknowledgement. Multi-line replies also fall back to clipboard instead of being pasted. Windows is the only platform with the paste primitive in v1; macOS / Linux are fallback-only (copy to clipboard). Direct Send reuses the existing `session-focus.js` eligibility rules: remote / host / web-UI sessions and sessions waiting on a permission decision are never paste targets. On successful Windows paste, Clawd restores the previous text clipboard where available.
 - **Mobile companion — read-only PWA LAN preview (M1)** (#391, #412, #419) - A new read-only mobile companion serves a small PWA over the local network so you can watch your sessions from a phone on the same Wi-Fi. It shows live session cards (agent type, active time, event icons), pushes updates event-driven with smooth expand animation and live timers, and hardens reliability with visibility-based reconnect, an uncapped retry, and a socket guard. This is a preview / read-only surface — it does not approve permissions or send prompts.
@@ -42,11 +42,13 @@ mobile companion over LAN, and Hermes Agent clarify / permission-bubble groundwo
 - **R3 Direct Send is an opt-in beta, default off, and Windows-first.** Enable it only if you want phone-to-terminal prompt delivery. It pastes a single-line reply without auto-Enter, confirms focus before pasting, restores the previous text clipboard after successful Windows paste where available, and falls back to the clipboard on any ambiguity, on multi-line replies, or on macOS / Linux.
 - **The mobile companion is read-only.** It previews sessions over the LAN and cannot approve permissions or send prompts.
 - **Telegram bot token storage is unchanged** — the token still lives only in `userData/telegram-approval.env` and is never read from environment variables. Secure OS-keystore storage is planned for a later release.
+- **Feishu / Lark approval is off by default.** To use it, create a self-built app bot, enable bot/card permissions, subscribe `card.action.trigger`, save App ID / App Secret in Settings -> Remote Approval -> Feishu / Lark, configure a receive id and allowed approver id, then run **Send test**. Credentials are stored outside prefs in `userData/feishu-approval.env`.
 - Release metadata is bumped to `0.9.0` in both `package.json` and `package-lock.json`.
 
 ### Docs & Contributors
 
 - A new `docs/connections/` plan set documents the Telegram native rework end to end: the D-migration path, the native companion architecture, the R3 Direct Send design, and the code-state reviews that corrected it.
+- Added `docs/guides/feishu-approval.md` for Feishu / Lark self-built app setup, receive id choices, Send test behavior, fallback semantics, and troubleshooting.
 - Added five bundled Clawd SVG animation assets (`clawd-coffee-hand`, `clawd-coffee-head-flip`, `clawd-aegyo-shy`, `clawd-dizzy`, `clawd-idle-low-battery`) for future theme wiring; they are not yet bound to the default state map.
 - External contributors shipped code across mobile preview, launch-session, Hermes, keep-awake, opencode, theme, and UI fixes, including two first-time contributors (@QingXB, @29206394 / 藤知).
 
@@ -66,6 +68,7 @@ Huge thanks to everyone who shipped code, tests, docs, or release polish for v0.
 ### Known Limitations
 
 - **Telegram native mode is dogfood-validated mainly on Windows.** The migration state machine and Telegram API handling are covered by unit tests and a fake Telegram server, but hands-on approval / migration testing is Windows-first. macOS / Linux rely on CI plus code review.
+- **Feishu / Lark approval needs real app-side setup.** Windows QA verified that the SDK long connection can start with real credentials, but Send test still depends on a valid app-visible receive id, bot install target, event subscription, and Feishu scopes. `user_id` delivery can require `contact:user.employee_id:readonly`; `chat_id` or `open_id` are usually the narrower setup.
 - **R3 Direct Send paste delivery is Windows-only in v1.** macOS / Linux are fallback-only (clipboard copy) until each has a real, tested paste / Enter primitive. Direct Send only pastes single-line replies, never pastes into a session that is waiting on a permission decision, and never auto-presses Enter.
 - **The mobile companion is read-only and LAN-only.** It is a preview surface on the local network; it does not expose approval or prompt-sending, and it is not a remote-over-internet control channel.
 - **The Go Telegram sidecar still ships in v0.9.0.** It is kept as the legacy / rollback path; removal is gated on native stability and migration feedback in a later release.

@@ -34,13 +34,14 @@ describe("doctor aggregate checks", () => {
     );
   });
 
-  it("runs all four Step 1 checks through injectable dependencies", () => {
+  it("runs Step 1 checks and Feishu approval diagnostics through injectable dependencies", () => {
     const result = runDoctorChecks({
       prefs: { theme: "clawd" },
       checkLocalServer: () => ({ id: "local-server", status: "pass", level: null }),
       checkAgentIntegrations: () => ({ id: "agent-integrations", status: "pass", level: null, details: [] }),
       checkPermissionBubblePolicy: () => ({ id: "permission-bubble-policy", status: "pass", level: null }),
       checkThemeHealth: () => ({ id: "theme-health", status: "pass", level: null }),
+      checkFeishuApprovalStatus: () => ({ id: "feishu-approval", status: "pass", level: null }),
     });
 
     assert.strictEqual(result.overall.status, "pass");
@@ -49,6 +50,30 @@ describe("doctor aggregate checks", () => {
       "agent-integrations",
       "permission-bubble-policy",
       "theme-health",
+      "feishu-approval",
     ]);
+  });
+
+  it("includes Feishu approval setup warnings in the overall Doctor result", () => {
+    const result = runDoctorChecks({
+      prefs: {
+        feishuApproval: {
+          enabled: true,
+          receiveId: "oc_target",
+          allowedOpenId: "ou_allowed",
+        },
+      },
+      feishuCredentialsStatus: { credentialsConfigured: false },
+      feishuApprovalStatus: { status: "stopped" },
+      checkLocalServer: () => ({ id: "local-server", status: "pass", level: null }),
+      checkAgentIntegrations: () => ({ id: "agent-integrations", status: "pass", level: null, details: [] }),
+      checkPermissionBubblePolicy: () => ({ id: "permission-bubble-policy", status: "pass", level: null }),
+      checkThemeHealth: () => ({ id: "theme-health", status: "pass", level: null }),
+    });
+
+    const check = result.checks.find((entry) => entry.id === "feishu-approval");
+    assert.equal(result.overall.status, "warning");
+    assert.equal(check.status, "fail");
+    assert.match(check.detail, /credentials/);
   });
 });

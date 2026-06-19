@@ -88,6 +88,14 @@ const ICONS = {
     '<path d="M12 11v6M12 7.5v.01"/>' +
     '</svg>',
 
+  // cup with straw (health reminders — drink / snack / stretch breaks)
+  healthReminder:
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="100%" height="100%">' +
+    '<path d="M6 8h12l-1.2 12a1.8 1.8 0 0 1-1.8 1.6H9a1.8 1.8 0 0 1-1.8-1.6Z"/>' +
+    '<path d="M5 8h14"/>' +
+    '<path d="M15 8l1-4.5"/>' +
+    '</svg>',
+
   // wrench (placeholder when a tab is missing one)
   placeholder:
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="100%" height="100%">' +

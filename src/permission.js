@@ -5,6 +5,16 @@ const { BrowserWindow, globalShortcut } = require("electron");
 const { getDefaultShortcuts } = require("./shortcut-actions");
 const { keepOutOfTaskbar } = require("./taskbar");
 const { clampTextScale, scaleWidth, scaleHeight, applyZoomToWindow } = require("./text-scale");
+const { startRemoteApprovalFanout } = require("./remote-approval/broker");
+const {
+  createRemoteApprovalProviderRegistry,
+} = require("./remote-approval/provider-registry");
+const {
+  createTelegramApprovalProvider,
+} = require("./remote-approval/providers/telegram-provider");
+const {
+  buildRemoteSuggestionButtons: buildRemoteSuggestionButtonsForPayload,
+} = require("./remote-approval/payload");
 const path = require("path");
 const http = require("http");
 const {
@@ -918,38 +928,10 @@ function buildRemoteApprovalSummary(permEntry) {
   return null;
 }
 
-function buildRemoteSuggestionLabel(suggestion) {
-  if (!suggestion || typeof suggestion !== "object") return "";
-  if (suggestion.type === "setMode") {
-    if (suggestion.mode === "acceptEdits") return "Auto edits";
-    if (suggestion.mode === "plan") return "Plan mode";
-    const mode = compactRemoteApprovalText(suggestion.mode || "", 18);
-    return mode ? `Mode: ${mode}` : "";
-  }
-  if (suggestion.type === "addRules") {
-    const rules = Array.isArray(suggestion.rules) ? suggestion.rules : [suggestion];
-    const first = rules.find((rule) => rule && typeof rule === "object") || {};
-    const behavior = compactRemoteApprovalText(suggestion.behavior || first.behavior || "allow", 12);
-    const isDeny = behavior === "deny";
-    const toolName = compactRemoteApprovalText(first.toolName || suggestion.toolName || "", 16);
-    if (toolName) return isDeny ? `Always deny ${toolName}` : `Always ${toolName}`;
-    return isDeny ? "Always deny" : "Always allow";
-  }
-  return "";
-}
-
 function buildRemoteSuggestionButtons(permEntry) {
   if (!isRemoteRichApprovalSupported(permEntry)) return [];
   const suggestions = Array.isArray(permEntry.suggestions) ? permEntry.suggestions : [];
-  const seen = new Set();
-  const buttons = [];
-  suggestions.forEach((suggestion, index) => {
-    const label = compactRemoteApprovalText(buildRemoteSuggestionLabel(suggestion), 28);
-    if (!label || seen.has(label)) return;
-    seen.add(label);
-    buttons.push({ index, label });
-  });
-  return buttons;
+  return buildRemoteSuggestionButtonsForPayload(suggestions);
 }
 
 // Returns the Telegram approval payload, or null when there is no safe summary
@@ -1006,11 +988,32 @@ function getTelegramApprovalClient() {
   return ctx.telegramApprovalClient || null;
 }
 
+function getRemoteApprovalClients() {
+  if (typeof ctx.getRemoteApprovalClients === "function") {
+    try {
+      const clients = ctx.getRemoteApprovalClients();
+      return Array.isArray(clients) ? clients : [];
+    } catch (err) {
+      permLog(`remote approval clients lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return [];
+    }
+  }
+  if (Array.isArray(ctx.remoteApprovalClients)) return ctx.remoteApprovalClients;
+  return createRemoteApprovalProviderRegistry({
+    providers: [
+      createTelegramApprovalProvider({ getClient: getTelegramApprovalClient }),
+    ],
+  }).listApprovalProviders();
+}
+
 function cancelRemoteApproval(permEntry) {
   const controller = permEntry && permEntry.remoteApprovalAbortController;
   if (!controller) return;
   permEntry.remoteApprovalAbortController = null;
-  try { controller.abort(); } catch {}
+  // v3: tell the remote provider WHY its card is being cancelled — the local
+  // desktop/terminal resolved this request — so a Feishu card shows "Resolved
+  // on desktop or terminal" instead of a misleading "Expired".
+  try { controller.abort("answered_elsewhere"); } catch {}
 }
 
 // "Go to terminal" path: drop the bubble, abort any in-flight Telegram prompt,
@@ -1047,60 +1050,143 @@ function maybeStartRemoteApproval(permEntry) {
   // entry is already gone from the pending list it was resolved (auto-approved
   // or otherwise) — don't fire a Telegram card for a closed request.
   if (pendingPermissions.indexOf(permEntry) === -1) return false;
-  const client = getTelegramApprovalClient();
-  if (!client || typeof client.requestApproval !== "function") return false;
-  if (typeof client.isEnabled === "function" && !client.isEnabled()) return false;
-
   const payload = buildRemoteApprovalPayload(permEntry);
   if (!payload) return false;
 
-  const controller = typeof AbortController === "function" ? new AbortController() : null;
-  if (controller) permEntry.remoteApprovalAbortController = controller;
-
-  let request;
-  try {
-    request = client.requestApproval(
-      payload,
-      controller ? { signal: controller.signal } : {}
-    );
-  } catch (err) {
-    if (controller && permEntry.remoteApprovalAbortController === controller) {
-      permEntry.remoteApprovalAbortController = null;
+  const normalizeForPermission = (decision) => {
+    const normalized = normalizeRemoteApprovalDecision(decision);
+    if (!normalized) {
+      if (decision) permLog(`remote approval ignored decision=${compactRemoteApprovalText(decision, 40)}`);
+      return null;
     }
-    permLog(`telegram remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
-    return false;
-  }
+    if (normalized.action !== "suggestion") return normalized;
+    if (!isRemoteRichApprovalSupported(permEntry)) {
+      permLog(`remote approval ignored rich decision for agent=${compactRemoteApprovalText(permEntry.agentId || "unknown", 80)}`);
+      return null;
+    }
+    const suggestion = Array.isArray(permEntry.suggestions) ? permEntry.suggestions[normalized.index] : null;
+    if (!suggestion) {
+      permLog(`remote approval ignored invalid suggestion index=${normalized.index}`);
+      return null;
+    }
+    return normalized;
+  };
 
-  Promise.resolve(request)
-    .then((decision) => {
-      const normalized = normalizeRemoteApprovalDecision(decision);
-      if (!normalized) {
-        if (decision) permLog(`telegram remote approval ignored decision=${compactRemoteApprovalText(decision, 40)}`);
-        return;
-      }
+  const handle = startRemoteApprovalFanout({
+    clients: getRemoteApprovalClients(),
+    payload,
+    normalizeDecision: normalizeForPermission,
+    log: (message) => permLog(message),
+    onDecision: (normalized, meta = {}) => {
+      const providerId = compactRemoteApprovalText(meta.providerId || "remote", 80);
       if (pendingPermissions.indexOf(permEntry) === -1) return;
       if (normalized.action === "allow" || normalized.action === "deny") {
         resolvePermissionEntry(permEntry, normalized.action);
         return;
       }
-      if (!isRemoteRichApprovalSupported(permEntry)) {
-        permLog(`telegram remote approval ignored rich decision for agent=${compactRemoteApprovalText(permEntry.agentId || "unknown", 80)}`);
-        return;
-      }
       if (!applyPermissionSuggestion(permEntry, normalized.index, { requireResolved: true })) {
-        permLog(`telegram remote approval ignored invalid suggestion index=${normalized.index}`);
+        permLog(`${providerId} remote approval ignored invalid suggestion index=${normalized.index}`);
         return;
       }
       resolvePermissionEntry(permEntry, "allow");
-    })
-    .catch((err) => {
-      permLog(`telegram remote approval failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
-    })
-    .finally(() => {
-      if (controller && permEntry.remoteApprovalAbortController === controller) {
-        permEntry.remoteApprovalAbortController = null;
-      }
-    });
+    },
+  });
+  if (!handle || !handle.started) return false;
+  permEntry.remoteApprovalAbortController = handle;
+  return true;
+}
+
+// ── v3: answer AskUserQuestion in Feishu (remote elicitation) ──
+// A parallel, opt-in path to maybeStartRemoteApproval. It does NOT touch the
+// allow/deny fanout — instead it asks elicitation-capable providers (Feishu) to
+// collect an answer, then maps it back through the existing local elicitation
+// contract (elicitation-submit → buildElicitationUpdatedInput).
+function getRemoteElicitationClients() {
+  if (typeof ctx.getRemoteElicitationClients === "function") {
+    try {
+      const clients = ctx.getRemoteElicitationClients();
+      return Array.isArray(clients) ? clients : [];
+    } catch (err) {
+      permLog(`remote elicitation clients lookup failed: ${compactRemoteApprovalText(err && err.message ? err.message : err, 200)}`);
+      return [];
+    }
+  }
+  return [];
+}
+
+function isRemoteElicitationActionable(permEntry) {
+  if (!permEntry || typeof permEntry !== "object") return false;
+  if (!permEntry.isElicitation) return false;
+  // v3 scope: AskUserQuestion only (Hermes "clarify" shares the shape).
+  if (permEntry.toolName !== "AskUserQuestion" && permEntry.toolName !== "clarify") return false;
+  const session = ctx.sessions && typeof ctx.sessions.get === "function"
+    ? ctx.sessions.get(permEntry.sessionId)
+    : null;
+  if (session && session.headless) return false;
+  const questions = permEntry.toolInput && Array.isArray(permEntry.toolInput.questions)
+    ? permEntry.toolInput.questions
+    : [];
+  return questions.some((q) => q && typeof q.question === "string" && q.question.trim());
+}
+
+function remoteElicitationOptionLabel(option) {
+  if (typeof option === "string") return option;
+  if (option && typeof option === "object") return option.label || option.text || option.value || "";
+  return "";
+}
+
+function buildRemoteElicitationPayload(permEntry) {
+  const questions = (permEntry.toolInput.questions || [])
+    .filter((q) => q && typeof q.question === "string" && q.question.trim())
+    .map((q) => ({
+      question: q.question,
+      options: (Array.isArray(q.options) ? q.options : [])
+        .map((o) => remoteElicitationOptionLabel(o))
+        .filter(Boolean),
+    }));
+  return { questions };
+}
+
+function maybeStartRemoteElicitation(permEntry) {
+  if (!isRemoteElicitationActionable(permEntry)) return false;
+  if (pendingPermissions.indexOf(permEntry) === -1) return false;
+  const clients = getRemoteElicitationClients();
+  if (!clients.length) return false;
+  const payload = buildRemoteElicitationPayload(permEntry);
+  if (!payload.questions.length) return false;
+
+  // Adapt elicitation clients onto the approval fanout: it only calls
+  // requestApproval, so route that to requestElicitation. supportsRichApproval
+  // keeps the fanout from filtering the "answer" decision.
+  const adapted = clients
+    .filter((client) => client && typeof client.requestElicitation === "function")
+    .map((client) => ({
+      id: client.id || "feishu",
+      isEnabled: client.isEnabled,
+      capabilities: { supportsRichApproval: true },
+      requestApproval: (p, options) => client.requestElicitation(p, options),
+    }));
+  if (!adapted.length) return false;
+
+  const normalizeAnswer = (decision) => {
+    if (!decision || typeof decision !== "object") return null;
+    if (decision.action !== "answer" || !decision.answers || typeof decision.answers !== "object") return null;
+    return { action: "answer", answers: decision.answers };
+  };
+
+  const handle = startRemoteApprovalFanout({
+    clients: adapted,
+    payload,
+    normalizeDecision: normalizeAnswer,
+    log: (message) => permLog(message),
+    onDecision: (normalized) => {
+      if (pendingPermissions.indexOf(permEntry) === -1) return;
+      permEntry.resolvedUpdatedInput = buildElicitationUpdatedInput(permEntry.toolInput, normalized.answers);
+      resolvePermissionEntry(permEntry, "allow");
+    },
+  });
+  if (!handle || !handle.started) return false;
+  permEntry.remoteApprovalAbortController = handle;
   return true;
 }
 
@@ -1138,6 +1224,12 @@ function applyPermissionSuggestion(perm, index, options = {}) {
     }
   const idx = pendingPermissions.indexOf(permEntry);
   if (idx === -1) return;
+  // v3 diagnostics: record HOW each request resolved (and whether a remote
+  // approval/elicitation card was still live). This pinpoints the "tool ran
+  // before I tapped Feishu" path — a local desktop click, a global hotkey,
+  // another provider, or a client disconnect — so the real trigger is no
+  // longer a guess. See feishu-remote-approval-v3-development-plan.md §3 Part2.
+  permLog(`resolve source: tool=${permEntry.toolName} behavior=${compactRemoteApprovalText(behavior, 24)} reason=${compactRemoteApprovalText(message || "local-ui", 48)} remotePending=${permEntry.remoteApprovalAbortController ? "yes" : "no"}`);
   cancelRemoteApproval(permEntry);
 
   // Minimum display time: if bubble just appeared and dismiss is automatic
@@ -1885,6 +1977,7 @@ return {
   pendingPermissions, PASSTHROUGH_TOOLS,
   addPendingPermission, removePendingPermission,
   maybeStartRemoteApproval,
+  maybeStartRemoteElicitation,
   dismissPermissionForTerminal,
   handleBubbleHeight, handleDecide, cleanup,
   showCodexNotifyBubble, clearCodexNotifyBubbles,

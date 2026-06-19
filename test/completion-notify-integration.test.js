@@ -11,6 +11,9 @@ const assert = require("node:assert");
 const path = require("path");
 const themeLoader = require("../src/theme-loader");
 const { createTelegramCompanion } = require("../src/telegram-companion");
+const {
+  createRemoteApprovalCompletionNotifier,
+} = require("../src/remote-approval/completion-notifier");
 
 themeLoader.init(path.join(__dirname, "..", "src"));
 const theme = themeLoader.loadTheme("clawd");
@@ -108,5 +111,65 @@ describe("#406 state -> Telegram completion integration", () => {
     mock.timers.tick(1000);
     await flush();
     assert.strictEqual(sent.length, 1, "the Notification does not bury the completion; exactly one push");
+  });
+});
+
+describe("state -> remote approval completion notifier integration", () => {
+  let api;
+  let sent;
+  let savedDebounceEnv;
+
+  beforeEach(() => {
+    mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+    savedDebounceEnv = process.env.CLAWD_COMPLETION_DEBOUNCE_MS;
+    process.env.CLAWD_COMPLETION_DEBOUNCE_MS = "1000";
+    sent = [];
+  });
+
+  afterEach(() => {
+    if (api) api.cleanup();
+    mock.timers.reset();
+    if (savedDebounceEnv === undefined) delete process.env.CLAWD_COMPLETION_DEBOUNCE_MS;
+    else process.env.CLAWD_COMPLETION_DEBOUNCE_MS = savedDebounceEnv;
+  });
+
+  it("keeps Feishu completion notifications default-off but sends when explicitly enabled", async () => {
+    const notifier = createRemoteApprovalCompletionNotifier({
+      getClient: () => ({
+        sendNotification: async (text) => { sent.push(text); return { ok: true }; },
+      }),
+      isEnabled: () => true,
+      getNotifyOnComplete: () => false,
+      getCompletionOutputMode: () => "off",
+    });
+    notifier.onSnapshot({ sessions: [] });
+    api = require("../src/state")(makeCtx({
+      broadcastSessionSnapshot: (snapshot) => notifier.onSnapshot(snapshot),
+    }));
+
+    stop(api, "s1", { assistantLastOutput: "All done." });
+    mock.timers.tick(1000);
+    await flush();
+    assert.strictEqual(sent.length, 0, "bare Feishu completion pings stay off by default");
+
+    api.cleanup();
+    const enabledNotifier = createRemoteApprovalCompletionNotifier({
+      getClient: () => ({
+        sendNotification: async (text) => { sent.push(text); return { ok: true }; },
+      }),
+      isEnabled: () => true,
+      getNotifyOnComplete: () => true,
+      getCompletionOutputMode: () => "off",
+    });
+    enabledNotifier.onSnapshot({ sessions: [] });
+    api = require("../src/state")(makeCtx({
+      broadcastSessionSnapshot: (snapshot) => enabledNotifier.onSnapshot(snapshot),
+    }));
+
+    stop(api, "s2", { assistantLastOutput: "All done." });
+    mock.timers.tick(1000);
+    await flush();
+    assert.strictEqual(sent.length, 1);
+    assert.match(sent[0], /done/);
   });
 });

@@ -4,6 +4,7 @@ const { checkLocalServer } = require("./doctor-detectors/local-server");
 const { checkAgentIntegrations } = require("./doctor-detectors/agent-integrations");
 const { checkPermissionBubblePolicy } = require("./doctor-detectors/permission-bubble-policy");
 const { checkThemeHealth } = require("./doctor-detectors/theme-health");
+const { checkFeishuApprovalStatus } = require("./feishu-approval-runtime-status");
 
 function normalizeCheckLevel(check) {
   if (!check) return null;
@@ -42,6 +43,11 @@ function runDoctorChecks(options = {}) {
       themeId: options.themeId,
       variant: options.variant,
       overrides: options.overrides,
+    }),
+    (options.checkFeishuApprovalStatus || checkFeishuApprovalStatus)({
+      prefs,
+      credentials: options.feishuCredentialsStatus,
+      runtimeStatus: options.feishuApprovalStatus,
     }),
   ];
 

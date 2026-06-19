@@ -922,6 +922,58 @@ function createSettingsAnimationOverridesMain(options = {}) {
     return cards;
   }
 
+  // Health reminder animation cards — keyed by animation key (drink/stretch/...),
+  // iterated in theme.json order so new v2 keys appear automatically. Mirrors
+  // buildReactionCards: file replacement + duration, no autoReturn/wide-hitbox.
+  function buildHealthReminderCards(themeOverrideMap) {
+    const activeTheme = getActiveTheme();
+    if (!activeTheme || !isPlainObject(activeTheme.healthReminders)) return [];
+    const healthMap = activeTheme.healthReminders;
+    const overrideMap = themeOverrideMap && themeOverrideMap.healthReminders;
+    const cards = [];
+    for (const key of Object.keys(healthMap)) {
+      const entry = healthMap[key];
+      if (!isPlainObject(entry)) continue;
+      const currentFile = (Array.isArray(entry.files) && entry.files[0]) || entry.file || null;
+      if (!currentFile) continue;
+      const durationMs = Number.isFinite(entry.duration) ? entry.duration : null;
+      const timingHint = buildTimingHint(currentFile, durationMs);
+      const preview = buildAnimationAssetPreview(currentFile);
+      const overrideEntry = overrideMap && overrideMap[key];
+      const hasDurationOverride = !!(overrideEntry
+        && Object.prototype.hasOwnProperty.call(overrideEntry, "durationMs"));
+      cards.push({
+        id: `health:${key}`,
+        slotType: "healthReminder",
+        sectionId: "health",
+        healthKey: key,
+        triggerKind: `health-${key}`,
+        currentFile,
+        baseFile: currentFile,
+        currentFileUrl: preview.fileUrl,
+        currentFilePreviewUrl: preview.previewImageUrl,
+        needsScriptedPreviewPoster: preview.needsScriptedPreviewPoster,
+        currentFilePreviewPosterCacheKey: preview.previewPosterCacheKey,
+        previewPosterPending: preview.previewPosterPending,
+        bindingLabel: `healthReminders.${key}`,
+        transition: readResolvedTransition(currentFile),
+        transitionThemeDefault: readThemeDefaultTransition(currentFile),
+        hasTransitionOverride: hasTransitionOverride(overrideEntry),
+        supportsAutoReturn: false,
+        supportsDuration: true,
+        autoReturnMs: null,
+        durationMs,
+        hasAutoReturnOverride: false,
+        hasDurationOverride,
+        ...timingHint,
+        previewDurationMs: timingHint.previewDurationMs || durationMs,
+        displayHintWarning: false,
+        displayHintTarget: null,
+      });
+    }
+    return cards;
+  }
+
   function pushSection(sections, id, mode, cards) {
     if (!Array.isArray(cards) || cards.length === 0) return;
     sections.push({ id, mode: mode || null, cards });
@@ -1010,6 +1062,9 @@ function createSettingsAnimationOverridesMain(options = {}) {
     const reactionCards = buildReactionCards(themeOverrideMap);
     pushSection(sections, "reactions", null, reactionCards);
 
+    const healthReminderCards = buildHealthReminderCards(themeOverrideMap);
+    pushSection(sections, "health", null, healthReminderCards);
+
     if (activeTheme.miniMode && activeTheme.miniMode.supported) {
       const miniCards = [];
       for (const stateKey of [
@@ -1034,7 +1089,7 @@ function createSettingsAnimationOverridesMain(options = {}) {
 
     for (const section of sections) {
       if (!section || !Array.isArray(section.cards)) continue;
-      if (section.id === "reactions") continue;
+      if (section.id === "reactions" || section.id === "health") continue;
       for (const card of section.cards) {
         const {
           wideHitboxEnabled,

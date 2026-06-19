@@ -829,6 +829,16 @@
       case "clickRightReaction": return t("animReactionClickRight");
       case "annoyedReaction": return t("animReactionAnnoyed");
       case "doubleReaction": return t("animReactionDouble");
+      case "health-drink": return t("animHealthDrink");
+      case "health-stretch": return t("animHealthStretch");
+      case "health-eat": return t("animHealthEat");
+      case "health-offwork": return t("animHealthOffwork");
+      case "health-eyerest": return t("animHealthEyerest");
+      case "health-breathe": return t("animHealthBreathe");
+      case "health-posture": return t("animHealthPosture");
+      case "health-walk": return t("animHealthWalk");
+      case "health-snack": return t("animHealthSnack");
+      case "health-sleeptime": return t("animHealthSleeptime");
       default: return card.triggerKind || card.stateKey || card.id;
     }
   }
@@ -842,6 +852,7 @@
       case "sleep": return t("animOverridesSectionSleep");
       case "mini": return t("animOverridesSectionMini");
       case "reactions": return t("animOverridesSectionReactions");
+      case "health": return t("animOverridesSectionHealth");
       default: return section.id;
     }
   }

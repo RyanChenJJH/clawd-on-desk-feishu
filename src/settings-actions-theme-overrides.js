@@ -12,6 +12,7 @@ const THEME_OVERRIDE_RESERVED_KEYS = new Set([
   "timings",
   "idleAnimations",
   "reactions",
+  "healthReminders",
   "hitbox",
   "sounds",
 ]);
@@ -80,6 +81,15 @@ function cloneReactionOverrides(themeMap) {
   return out;
 }
 
+function cloneHealthReminderOverrides(themeMap) {
+  const out = {};
+  if (!isPlainObject(themeMap) || !isPlainObject(themeMap.healthReminders)) return out;
+  for (const [healthKey, entry] of Object.entries(themeMap.healthReminders)) {
+    if (isPlainObject(entry)) out[healthKey] = { ...entry };
+  }
+  return out;
+}
+
 function cloneHitboxOverrides(themeMap) {
   const out = {};
   if (!isPlainObject(themeMap) || !isPlainObject(themeMap.hitbox)) return out;
@@ -105,6 +115,7 @@ function buildThemeOverrideMap({
   autoReturn,
   idleAnimations,
   reactions,
+  healthReminders,
   hitbox,
   sounds,
 }) {
@@ -117,6 +128,7 @@ function buildThemeOverrideMap({
   if (autoReturn && Object.keys(autoReturn).length > 0) out.timings = { autoReturn };
   if (idleAnimations && Object.keys(idleAnimations).length > 0) out.idleAnimations = idleAnimations;
   if (reactions && Object.keys(reactions).length > 0) out.reactions = reactions;
+  if (healthReminders && Object.keys(healthReminders).length > 0) out.healthReminders = healthReminders;
   if (hitbox && Object.keys(hitbox).length > 0) out.hitbox = hitbox;
   if (sounds && Object.keys(sounds).length > 0) out.sounds = sounds;
   return out;
@@ -180,6 +192,7 @@ function setThemeOverrideDisabled(payload, deps) {
     autoReturn: cloneAutoReturnOverrides(currentThemeMap),
     idleAnimations: cloneIdleAnimationOverrides(currentThemeMap),
     reactions: cloneReactionOverrides(currentThemeMap),
+    healthReminders: cloneHealthReminderOverrides(currentThemeMap),
     hitbox: cloneHitboxOverrides(currentThemeMap),
     sounds: cloneSoundOverrides(currentThemeMap),
   });
@@ -200,8 +213,8 @@ function setAnimationOverride(payload, deps) {
   const { themeId, slotType } = payload;
   const idCheck = _validateAnimationOverrideThemeId(themeId);
   if (idCheck.status !== "ok") return idCheck;
-  if (slotType !== "state" && slotType !== "tier" && slotType !== "idleAnimation" && slotType !== "reaction") {
-    return { status: "error", message: "setAnimationOverride.slotType must be 'state', 'tier', 'idleAnimation', or 'reaction'" };
+  if (slotType !== "state" && slotType !== "tier" && slotType !== "idleAnimation" && slotType !== "reaction" && slotType !== "healthReminder") {
+    return { status: "error", message: "setAnimationOverride.slotType must be 'state', 'tier', 'idleAnimation', 'reaction', or 'healthReminder'" };
   }
 
   const touchesFile = Object.prototype.hasOwnProperty.call(payload, "file");
@@ -251,6 +264,7 @@ function setAnimationOverride(payload, deps) {
   const nextAutoReturn = cloneAutoReturnOverrides(currentThemeMap);
   const nextIdleAnimations = cloneIdleAnimationOverrides(currentThemeMap);
   const nextReactions = cloneReactionOverrides(currentThemeMap);
+  const nextHealthReminders = cloneHealthReminderOverrides(currentThemeMap);
   const nextHitbox = cloneHitboxOverrides(currentThemeMap);
   const nextSounds = cloneSoundOverrides(currentThemeMap);
 
@@ -339,7 +353,7 @@ function setAnimationOverride(payload, deps) {
     }
     if (Object.keys(nextEntry).length > 0) nextIdleAnimations[originalFile] = nextEntry;
     else delete nextIdleAnimations[originalFile];
-  } else {
+  } else if (slotType === "reaction") {
     const { reactionKey } = payload;
     if (!REACTION_KEYS.has(reactionKey)) {
       return { status: "error", message: "setAnimationOverride.reactionKey must be one of: drag, clickLeft, clickRight, annoyed, double" };
@@ -369,6 +383,35 @@ function setAnimationOverride(payload, deps) {
     }
     if (Object.keys(nextEntry).length > 0) nextReactions[reactionKey] = nextEntry;
     else delete nextReactions[reactionKey];
+  } else {
+    // healthReminder slot — keyed by the animation key (drink/stretch/...).
+    // Supports file/transition/duration like reactions; no autoReturn.
+    const { healthKey } = payload;
+    if (typeof healthKey !== "string" || !healthKey) {
+      return { status: "error", message: "setAnimationOverride.healthKey must be a non-empty string for healthReminder slots" };
+    }
+    if (touchesAutoReturn) {
+      return { status: "error", message: "setAnimationOverride.autoReturnMs is not supported for healthReminder slots" };
+    }
+    const nextEntry = { ...(nextHealthReminders[healthKey] || {}) };
+    if (touchesFile) {
+      if (payload.file === null) {
+        delete nextEntry.file;
+        delete nextEntry.sourceThemeId;
+      } else {
+        nextEntry.file = payload.file;
+      }
+    }
+    if (touchesTransition) {
+      if (payload.transition === null || transitionMatchesDefault) delete nextEntry.transition;
+      else nextEntry.transition = normalizedTransition;
+    }
+    if (touchesDuration) {
+      if (payload.durationMs === null) delete nextEntry.durationMs;
+      else nextEntry.durationMs = payload.durationMs;
+    }
+    if (Object.keys(nextEntry).length > 0) nextHealthReminders[healthKey] = nextEntry;
+    else delete nextHealthReminders[healthKey];
   }
 
   const nextThemeMap = buildThemeOverrideMap({
@@ -378,6 +421,7 @@ function setAnimationOverride(payload, deps) {
     autoReturn: nextAutoReturn,
     idleAnimations: nextIdleAnimations,
     reactions: nextReactions,
+    healthReminders: nextHealthReminders,
     hitbox: nextHitbox,
     sounds: nextSounds,
   });
@@ -439,6 +483,7 @@ function setSoundOverride(payload, deps) {
     autoReturn: cloneAutoReturnOverrides(currentThemeMap),
     idleAnimations: cloneIdleAnimationOverrides(currentThemeMap),
     reactions: cloneReactionOverrides(currentThemeMap),
+    healthReminders: cloneHealthReminderOverrides(currentThemeMap),
     hitbox: cloneHitboxOverrides(currentThemeMap),
     sounds: nextSounds,
   });

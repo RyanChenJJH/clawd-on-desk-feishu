@@ -11,6 +11,12 @@ const SECRET_PATTERNS = [
   [/AKIA[0-9A-Z]{16}/g, "[REDACTED]"],
   [/"password"\s*:\s*"[^"]+"/gi, '"password": "[REDACTED]"'],
   [/"api[_-]?key"\s*:\s*"[^"]+"/gi, '"api_key": "[REDACTED]"'],
+  [/"(appId|appSecret|receiveId|openId|userId|chatId|messageId)"\s*:\s*"[^"]+"/gi, '"$1": "[REDACTED]"'],
+  [/\b(?:app[_-]?id|app[_-]?secret|receive[_-]?id|open[_-]?id|user[_-]?id|chat[_-]?id|message[_-]?id)\s*[:=]\s*("[^"]+"|[^\s,;|)]+)/gi, (match) => {
+    const sep = match.includes("=") ? "=" : ":";
+    return `${match.slice(0, match.indexOf(sep)).trim()}${sep}[REDACTED]`;
+  }],
+  [/\b(?:cli|oc|ou|on|om)_[A-Za-z0-9_-]{6,}\b/g, "[REDACTED]"],
 ];
 
 function escapeRegExp(value) {

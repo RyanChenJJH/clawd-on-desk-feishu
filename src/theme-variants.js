@@ -279,6 +279,36 @@ function applyUserOverridesPatch(raw, overrides) {
     patched.reactions = nextReactions;
   }
 
+  // Health reminder animation overrides — keyed by animation key (drink/...).
+  // Same shape as reactions: file replaces the slot, durationMs maps to duration.
+  const healthReminderOverrides = isPlainObject(overrides.healthReminders) ? overrides.healthReminders : null;
+  if (healthReminderOverrides && isPlainObject(raw.healthReminders)) {
+    const nextHealth = { ...raw.healthReminders };
+    for (const [healthKey, entry] of Object.entries(healthReminderOverrides)) {
+      if (!isPlainObject(entry)) continue;
+      const rawEntry = nextHealth[healthKey];
+      if (!isPlainObject(rawEntry)) continue;
+      const nextEntry = { ...rawEntry };
+      const hasNewFile = typeof entry.file === "string" && entry.file;
+      if (hasNewFile) {
+        if (Array.isArray(nextEntry.files) && nextEntry.files.length > 0) {
+          nextEntry.files = [entry.file, ...nextEntry.files.slice(1)];
+        } else {
+          nextEntry.file = entry.file;
+        }
+      }
+      if (Number.isFinite(entry.durationMs)) {
+        nextEntry.duration = entry.durationMs;
+      }
+      nextHealth[healthKey] = nextEntry;
+      const transitionTarget = hasNewFile
+        ? entry.file
+        : (nextEntry.file || (Array.isArray(nextEntry.files) ? nextEntry.files[0] : null));
+      if (transitionTarget) applyTransitionOverride(patched, transitionTarget, entry.transition);
+    }
+    patched.healthReminders = nextHealth;
+  }
+
   const idleAnimationOverrides = isPlainObject(overrides.idleAnimations) ? overrides.idleAnimations : null;
   if (idleAnimationOverrides && Array.isArray(raw.idleAnimations)) {
     const nextIdleAnimations = raw.idleAnimations.map((entry) => (isPlainObject(entry) ? { ...entry } : entry));

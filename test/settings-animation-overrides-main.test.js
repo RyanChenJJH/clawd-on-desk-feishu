@@ -437,3 +437,28 @@ test("animation override data builds tier cards with transition override metadat
     harness.cleanup();
   }
 });
+
+test("animation override data includes a health reminder section with per-key cards", () => {
+  const harness = createRuntimeHarness({
+    activeThemeFactory: (root) => makeTheme(root, {
+      healthReminders: {
+        drink: { file: "idle.svg", duration: 4000 },
+        stretch: { file: "scripted.svg", duration: 4500 },
+      },
+    }),
+  });
+  try {
+    const data = harness.runtime.buildAnimationOverrideData();
+    const healthSection = data.sections.find((section) => section.id === "health");
+    assert.ok(healthSection, "expected a 'health' section");
+    assert.strictEqual(healthSection.cards.length, 2);
+    const drink = data.cards.find((card) => card.id === "health:drink");
+    assert.ok(drink);
+    assert.strictEqual(drink.slotType, "healthReminder");
+    assert.strictEqual(drink.healthKey, "drink");
+    assert.strictEqual(drink.supportsDuration, true);
+    assert.strictEqual(drink.durationMs, 4000);
+  } finally {
+    harness.cleanup();
+  }
+});

@@ -616,6 +616,9 @@ function getAssetUrl(file) {
 window.electronAPI.onStartDragReaction((direction) => startDragReaction(direction));
 window.electronAPI.onEndDragReaction(() => endDragReaction());
 window.electronAPI.onPlayClickReaction((svg, duration) => playReaction(svg, duration));
+// Health reminder body animation reuses the transient reaction overlay, so a
+// task state change still cancels it (it is only dispatched while idle anyway).
+window.electronAPI.onPlayHealthReminder((svg, duration) => playReaction(svg, duration));
 
 function playReaction(svgFile, durationMs) {
   isReacting = true;

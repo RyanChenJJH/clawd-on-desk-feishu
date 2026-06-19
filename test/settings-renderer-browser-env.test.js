@@ -972,6 +972,27 @@ function loadTelegramApprovalTabForTest({
       if (name === "telegramApproval.tokenInfo") {
         return Promise.resolve({ status: "ok", configured: false, masked: "" });
       }
+      if (name === "feishuApproval.status") {
+        return Promise.resolve({
+          status: "ok",
+          state: {
+            status: "stopped",
+            configured: false,
+            enabled: false,
+            reason: "disabled",
+            message: "",
+            credentialsStored: false,
+          },
+        });
+      }
+      if (name === "feishuApproval.credentialsInfo") {
+        return Promise.resolve({
+          status: "ok",
+          configured: false,
+          appId: "",
+          maskedAppSecret: "",
+        });
+      }
       return Promise.resolve({ status: "ok" });
     },
     ...settingsAPI,
@@ -1298,6 +1319,42 @@ describe("settings renderer browser environment", () => {
 
     for (const login of VERIFIED_GITHUB_CONTRIBUTORS) {
       assert.ok(i18nBundle.CONTRIBUTORS.includes(login), `About contributors should include ${login}`);
+    }
+  });
+
+  it("ships Feishu Remote Approval settings copy in every settings language", () => {
+    const strings = loadSettingsI18nForTest();
+    const requiredKeys = [
+      "feishuApprovalChannelName",
+      "feishuApprovalStep1Title",
+      "feishuApprovalCredentialsLabel",
+      "feishuApprovalSaveCredentials",
+      "feishuApprovalStep2Title",
+      "feishuApprovalRecipientLabel",
+      "feishuApprovalSaveRecipient",
+      "feishuApprovalStep3Title",
+      "feishuApprovalToggle",
+      "feishuApprovalNotifyOnComplete",
+      "feishuApprovalNotifyOnCompleteDesc",
+      "feishuApprovalCompletionOutput",
+      "feishuApprovalCompletionOutputDesc",
+      "feishuApprovalCompletionOutput_off",
+      "feishuApprovalCompletionOutput_full",
+      "feishuApprovalCompletionOutputFullConfirm",
+      "feishuApprovalSendTest",
+      "feishuApprovalTestLogTitle",
+      "feishuApprovalTestLogPending",
+      "feishuApprovalPrereqMissingCredentials",
+      "feishuApprovalPrereqMissingRecipient",
+      "feishuApprovalPrereqMissingApprover",
+    ];
+    for (const lang of SUPPORTED_LANGS) {
+      const dict = strings[lang];
+      assert.ok(dict, `settings language ${lang} should exist`);
+      for (const key of requiredKeys) {
+        assert.ok(dict[key], `${lang} should include ${key}`);
+      }
+      assert.match(dict.remoteApprovalSubtitle, /Feishu|飞书|飛書/);
     }
   });
 
@@ -2775,6 +2832,585 @@ describe("settings renderer browser environment", () => {
     assert.ok(telegramCard, "Telegram approval card should render");
     assert.ok(remoteHarness.content.children.indexOf(telegramCard) < remoteHarness.content.children.indexOf(hardwareBuddy));
     assert.strictEqual(hardwareBuddy.dataset.groupId, "remote-approval.hardware-buddy");
+  });
+
+  it("renders Feishu approval as a default-off channel before Hardware Buddy", () => {
+    const remoteHarness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: false,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "",
+          allowedOpenId: "",
+          allowedUserId: "",
+          notifyOnComplete: false,
+        },
+        hardwareBuddy: {
+          enabled: false,
+          backend: "bleak",
+          address: "",
+          namePrefix: "Clawstick",
+          permissionsEnabled: false,
+        },
+      },
+    });
+
+    const telegramCard = remoteHarness.content.querySelector(".tg-approval-channel-card");
+    const feishuCard = remoteHarness.content.querySelector(".feishu-approval-channel-card");
+    const hardwareBuddy = remoteHarness.content.querySelector(".hardware-buddy-collapsible");
+    assert.ok(telegramCard, "Telegram approval card should render");
+    assert.ok(feishuCard, "Feishu approval card should render");
+    assert.ok(hardwareBuddy, "Hardware Buddy panel should render");
+    assert.ok(remoteHarness.content.children.indexOf(telegramCard) < remoteHarness.content.children.indexOf(feishuCard));
+    assert.ok(remoteHarness.content.children.indexOf(feishuCard) < remoteHarness.content.children.indexOf(hardwareBuddy));
+    assert.strictEqual(feishuCard.dataset.groupId, "remote-approval.feishu");
+    assert.strictEqual(
+      feishuCard.querySelector(".tg-approval-channel-name").textContent,
+      "feishuApprovalChannelName",
+    );
+    assert.ok(feishuCard.querySelector(".tg-approval-channel-badge").classList.contains("tg-approval-badge-incomplete"));
+    assert.ok(feishuCard.querySelector(".feishu-approval-enabled-row .switch").classList.contains("disabled"));
+    assert.strictEqual(feishuCard.querySelector(".feishu-approval-test-button").disabled, true);
+  });
+
+  it("saves Feishu recipient config through the Feishu settings key only", () => {
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: false,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "",
+          allowedOpenId: "",
+          allowedUserId: "",
+          recipients: [{
+            receiveIdType: "chat_id",
+            receiveId: "oc_extra_target",
+            allowedOpenId: "ou_extra_approver",
+            allowedUserId: "",
+          }],
+          notifyOnComplete: true,
+          completionOutputMode: "full",
+          statusCommandEnabled: false,
+        },
+      },
+    });
+
+    const feishuCard = harness.content.querySelector(".feishu-approval-channel-card");
+    const region = feishuCard.querySelector(".feishu-approval-region-select");
+    const receiveIdType = feishuCard.querySelector(".feishu-approval-receive-id-type-select");
+    const receiveId = feishuCard.querySelector(".feishu-approval-receive-id-input");
+    const allowedOpenId = feishuCard.querySelector(".feishu-approval-allowed-open-id-input");
+    const allowedUserId = feishuCard.querySelector(".feishu-approval-allowed-user-id-input");
+
+    region.value = "lark";
+    region.dispatchEvent({ type: "change" });
+    receiveIdType.value = "open_id";
+    receiveIdType.dispatchEvent({ type: "change" });
+    receiveId.value = "ou_target_chat";
+    receiveId.dispatchEvent({ type: "input" });
+    allowedOpenId.value = "ou_approver";
+    allowedOpenId.dispatchEvent({ type: "input" });
+    allowedUserId.value = "user_approver";
+    allowedUserId.dispatchEvent({ type: "input" });
+
+    feishuCard.querySelector(".feishu-approval-save-recipient").dispatchEvent({ type: "click" });
+
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(harness.updates)), [{
+      key: "feishuApproval",
+      value: {
+        enabled: false,
+        region: "lark",
+        receiveIdType: "open_id",
+        receiveId: "ou_target_chat",
+        allowedOpenId: "ou_approver",
+        allowedUserId: "user_approver",
+        recipients: [{
+          receiveIdType: "chat_id",
+          receiveId: "oc_extra_target",
+          allowedOpenId: "ou_extra_approver",
+          allowedUserId: "",
+        }],
+        notifyOnComplete: true,
+        completionOutputMode: "full",
+        statusCommandEnabled: false,
+        elicitationEnabled: false,
+      },
+    }]);
+  });
+
+  it("toggles Feishu completion notifications without enabling approval transport", async () => {
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: false,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "oc_configured_target",
+          allowedOpenId: "ou_configured_approver",
+          allowedUserId: "",
+          notifyOnComplete: false,
+          completionOutputMode: "off",
+          statusCommandEnabled: false,
+        },
+      },
+      settingsAPI: {
+        command: (name) => {
+          if (name === "feishuApproval.status") {
+            return Promise.resolve({
+              status: "ok",
+              state: {
+                status: "stopped",
+                configured: true,
+                enabled: false,
+                credentialsStored: true,
+              },
+            });
+          }
+          if (name === "feishuApproval.credentialsInfo") {
+            return Promise.resolve({
+              status: "ok",
+              configured: true,
+              appId: "cli_configured",
+              maskedAppSecret: "conf...ured",
+            });
+          }
+          return Promise.resolve({ status: "ok" });
+        },
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    const card = harness.content.querySelector(".feishu-approval-channel-card");
+    const sw = card.querySelector(".feishu-approval-notify-completion-row .switch");
+    assert.equal(sw.classList.contains("disabled"), false);
+    sw.dispatchEvent({ type: "click" });
+
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(harness.updates)), [{
+      key: "feishuApproval",
+      value: {
+        enabled: false,
+        region: "feishu",
+        receiveIdType: "chat_id",
+        receiveId: "oc_configured_target",
+        allowedOpenId: "ou_configured_approver",
+        allowedUserId: "",
+        notifyOnComplete: true,
+        completionOutputMode: "off",
+        statusCommandEnabled: false,
+        elicitationEnabled: false,
+      },
+    }]);
+  });
+
+  it("requires confirmation before enabling full Feishu completion output", async () => {
+    const confirmCalls = [];
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: true,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "oc_configured_target",
+          allowedOpenId: "ou_configured_approver",
+          allowedUserId: "",
+          notifyOnComplete: true,
+          completionOutputMode: "off",
+          statusCommandEnabled: false,
+        },
+      },
+      confirm: (message) => {
+        confirmCalls.push(message);
+        return false;
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    const select = harness.content.querySelector(".feishu-approval-output-select");
+    assert.deepStrictEqual(select.children.map((option) => option.value), ["off", "full"]);
+    select.value = "full";
+    select.dispatchEvent({ type: "change" });
+
+    assert.deepStrictEqual(confirmCalls, ["feishuApprovalCompletionOutputFullConfirm"]);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(harness.updates)), []);
+    assert.equal(select.value, "off");
+
+    const confirmed = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: true,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "oc_configured_target",
+          allowedOpenId: "ou_configured_approver",
+          allowedUserId: "",
+          notifyOnComplete: true,
+          completionOutputMode: "off",
+          statusCommandEnabled: false,
+        },
+      },
+      confirm: () => true,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    confirmed.render();
+
+    const confirmedSelect = confirmed.content.querySelector(".feishu-approval-output-select");
+    confirmedSelect.value = "full";
+    confirmedSelect.dispatchEvent({ type: "change" });
+
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(confirmed.updates)), [{
+      key: "feishuApproval",
+      value: {
+        enabled: true,
+        region: "feishu",
+        receiveIdType: "chat_id",
+        receiveId: "oc_configured_target",
+        allowedOpenId: "ou_configured_approver",
+        allowedUserId: "",
+        notifyOnComplete: true,
+        completionOutputMode: "full",
+        statusCommandEnabled: false,
+        elicitationEnabled: false,
+      },
+    }]);
+  });
+
+  it("saves and deletes Feishu credentials without keeping the raw secret in the DOM", async () => {
+    const commandCalls = [];
+    let storedCredentials = null;
+    const rawSecret = "super-secret-value";
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: false,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "",
+          allowedOpenId: "",
+          allowedUserId: "",
+          notifyOnComplete: false,
+          statusCommandEnabled: false,
+        },
+      },
+      settingsAPI: {
+        command: (name, payload) => {
+          commandCalls.push({ name, payload });
+          if (name === "telegramApproval.status") {
+            return Promise.resolve({ status: "ok", state: { status: "stopped", tokenStored: false } });
+          }
+          if (name === "telegramApproval.tokenInfo") {
+            return Promise.resolve({ status: "ok", configured: false, masked: "" });
+          }
+          if (name === "feishuApproval.status") {
+            return Promise.resolve({
+              status: "ok",
+              state: {
+                status: "stopped",
+                configured: !!storedCredentials,
+                enabled: false,
+                credentialsStored: !!storedCredentials,
+              },
+            });
+          }
+          if (name === "feishuApproval.credentialsInfo") {
+            return Promise.resolve(storedCredentials
+              ? {
+                  status: "ok",
+                  configured: true,
+                  appId: storedCredentials.appId,
+                  maskedAppSecret: "supe...alue",
+                }
+              : {
+                  status: "ok",
+                  configured: false,
+                  appId: "",
+                  maskedAppSecret: "",
+                });
+          }
+          if (name === "feishuApproval.setCredentials") {
+            storedCredentials = { appId: payload.appId };
+            return Promise.resolve({ status: "ok", configured: true });
+          }
+          if (name === "feishuApproval.deleteCredentialsFile") {
+            storedCredentials = null;
+            return Promise.resolve({ status: "ok", deleted: true });
+          }
+          return Promise.resolve({ status: "ok" });
+        },
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const card = harness.content.querySelector(".feishu-approval-channel-card");
+    card.querySelector(".feishu-approval-app-id-input").value = "cli_abcdef";
+    card.querySelector(".feishu-approval-app-secret-input").value = rawSecret;
+    card.querySelector(".feishu-approval-save-credentials").dispatchEvent({ type: "click" });
+
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(
+      commandCalls.filter((call) => call.name === "feishuApproval.setCredentials")
+    )), [{
+      name: "feishuApproval.setCredentials",
+      payload: { appId: "cli_abcdef", appSecret: rawSecret },
+    }]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    const renderedStrings = [];
+    const collectStrings = (node) => {
+      if (!node) return;
+      for (const key of ["textContent", "value", "title", "placeholder"]) {
+        if (node[key]) renderedStrings.push(String(node[key]));
+      }
+      for (const child of node.children || []) collectStrings(child);
+    };
+    collectStrings(harness.content);
+    assert.equal(renderedStrings.some((value) => value.includes(rawSecret)), false);
+    assert.equal(renderedStrings.some((value) => value.includes("supe...alue")), true);
+
+    harness.content
+      .querySelector(".feishu-approval-delete-credentials")
+      .dispatchEvent({ type: "click" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(
+      commandCalls.some((call) => call.name === "feishuApproval.deleteCredentialsFile"),
+      true,
+    );
+  });
+
+  it("enables and sends only the Feishu test-card command once configured", async () => {
+    const commandCalls = [];
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: false,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "oc_target",
+          allowedOpenId: "ou_approver",
+          allowedUserId: "",
+          notifyOnComplete: false,
+          statusCommandEnabled: false,
+        },
+      },
+      settingsAPI: {
+        command: (name, payload) => {
+          commandCalls.push({ name, payload });
+          if (name === "telegramApproval.status") {
+            return Promise.resolve({ status: "ok", state: { status: "stopped", tokenStored: false } });
+          }
+          if (name === "telegramApproval.tokenInfo") {
+            return Promise.resolve({ status: "ok", configured: false, masked: "" });
+          }
+          if (name === "feishuApproval.status") {
+            return Promise.resolve({
+              status: "ok",
+              state: {
+                status: "stopped",
+                configured: true,
+                enabled: false,
+                credentialsStored: true,
+              },
+            });
+          }
+          if (name === "feishuApproval.credentialsInfo") {
+            return Promise.resolve({
+              status: "ok",
+              configured: true,
+              appId: "cli_abcdef",
+              maskedAppSecret: "supe...alue",
+            });
+          }
+          if (name === "feishuApproval.test") {
+            return Promise.resolve({ status: "ok", decision: "allow" });
+          }
+          return Promise.resolve({ status: "ok" });
+        },
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    const card = harness.content.querySelector(".feishu-approval-channel-card");
+    const sw = card.querySelector(".feishu-approval-enabled-row .switch");
+    const testButton = card.querySelector(".feishu-approval-test-button");
+    assert.equal(sw.classList.contains("disabled"), false);
+    assert.equal(testButton.disabled, false);
+
+    sw.dispatchEvent({ type: "click" });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(harness.updates)), [{
+      key: "feishuApproval",
+      value: {
+        enabled: true,
+        region: "feishu",
+        receiveIdType: "chat_id",
+        receiveId: "oc_target",
+        allowedOpenId: "ou_approver",
+        allowedUserId: "",
+        completionOutputMode: "off",
+        notifyOnComplete: false,
+        statusCommandEnabled: false,
+        elicitationEnabled: false,
+      },
+    }]);
+
+    testButton.dispatchEvent({ type: "click" });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      commandCalls.some((call) => call.name === "feishuApproval.test"),
+      true,
+    );
+    assert.equal(
+      commandCalls.some((call) => String(call.name).includes("permission")),
+      false,
+    );
+  });
+
+  it("shows Feishu send-test diagnostic logs only after a test run", async () => {
+    const harness = loadTelegramApprovalTabForTest({
+      snapshot: {
+        tgApproval: {
+          enabled: false,
+          allowedTgUserId: "123456789",
+          targetSessionKey: "telegram:123456789",
+        },
+        feishuApproval: {
+          enabled: true,
+          region: "feishu",
+          receiveIdType: "chat_id",
+          receiveId: "oc_target",
+          allowedOpenId: "ou_approver",
+          allowedUserId: "",
+          notifyOnComplete: false,
+        },
+      },
+      settingsAPI: {
+        command: (name) => {
+          if (name === "telegramApproval.status") {
+            return Promise.resolve({ status: "ok", state: { status: "stopped", tokenStored: false } });
+          }
+          if (name === "telegramApproval.tokenInfo") {
+            return Promise.resolve({ status: "ok", configured: false, masked: "" });
+          }
+          if (name === "feishuApproval.status") {
+            return Promise.resolve({
+              status: "ok",
+              state: {
+                status: "running",
+                configured: true,
+                enabled: true,
+                credentialsStored: true,
+              },
+            });
+          }
+          if (name === "feishuApproval.credentialsInfo") {
+            return Promise.resolve({
+              status: "ok",
+              configured: true,
+              appId: "cli_abcdef",
+              maskedAppSecret: "supe...alue",
+            });
+          }
+          if (name === "feishuApproval.test") {
+            return Promise.resolve({
+              status: "timeout",
+              message: "No callback received",
+              logs: [
+                { level: "info", message: "Card sent; waiting for Allow/Deny." },
+                { level: "warn", message: "Timed out waiting for card action callback." },
+              ],
+            });
+          }
+          return Promise.resolve({ status: "ok" });
+        },
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+    assert.strictEqual(harness.content.querySelector(".feishu-approval-test-log-row"), null);
+
+    harness.content
+      .querySelector(".feishu-approval-test-button")
+      .dispatchEvent({ type: "click" });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    harness.render();
+
+    const logRow = harness.content.querySelector(".feishu-approval-test-log-row");
+    assert.ok(logRow);
+    assert.strictEqual(
+      logRow.querySelector(".feishu-approval-test-log-title").textContent,
+      "feishuApprovalTestLogTitle",
+    );
+    const messages = logRow
+      .querySelectorAll(".feishu-approval-test-log-message")
+      .map((el) => el.textContent);
+    assert.deepStrictEqual(messages, [
+      "Card sent; waiting for Allow/Deny.",
+      "Timed out waiting for card action callback.",
+    ]);
   });
 
   it("renders Hardware Buddy with the same remote approval channel header style", () => {
@@ -5270,6 +5906,13 @@ describe("settings renderer browser environment", () => {
     assert.match(css, /\.shortcut-row \.row-text\s*\{[\s\S]*?flex:\s*0 0 190px;[\s\S]*?\}/);
     assert.match(css, /\.shortcut-row \.row-label\s*\{[\s\S]*?word-break:\s*keep-all;[\s\S]*?overflow-wrap:\s*normal;[\s\S]*?\}/);
     assert.match(css, /\.shortcut-value\s*\{[\s\S]*?flex:\s*1 1 190px;[\s\S]*?min-width:\s*160px;[\s\S]*?max-width:\s*286px;[\s\S]*?\}/);
+  });
+
+  it("keeps Feishu credential rows from collapsing into single-glyph columns", () => {
+    const css = fs.readFileSync(SETTINGS_CSS, "utf8");
+    assert.match(css, /\.feishu-approval-credentials-stored-row\s*\{[\s\S]*?flex-direction:\s*column;[\s\S]*?align-items:\s*stretch;[\s\S]*?\}/);
+    assert.match(css, /\.feishu-approval-credentials-stored-row \.row-control\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-content:\s*flex-start;[\s\S]*?\}/);
+    assert.match(css, /\.feishu-approval-secret-masked\s*\{[\s\S]*?white-space:\s*nowrap;[\s\S]*?word-break:\s*keep-all;[\s\S]*?\}/);
   });
 
   it("counts sound overrides in the theme-overrides reset gate", () => {

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: light dark; }
+  html, body {
+    margin: 0; padding: 0; background: transparent; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  /* v3.1 "tech" card — a DARK translucent glass panel with a Clawd-orange neon
+     edge + glow and layered shadows for a raised 3D feel. Kept dark in BOTH OS
+     themes on purpose so the orange neon reads as "tech / HUD" rather than a soft
+     cozy card. NOTE: backdrop-filter only frosts in-page content (a transparent
+     Electron window has nothing behind it), so the glass look comes from the rgba
+     gradient + shadows + glow, not a real desktop blur. */
+  #card {
+    position: relative;
+    box-sizing: border-box;
+    margin: 8px;
+    padding: 11px 13px;
+    border-radius: 13px;
+    color: #f1eae3;
+    background:
+      linear-gradient(155deg, rgba(34, 30, 36, 0.93) 0%, rgba(21, 19, 25, 0.89) 100%);
+    border: 1px solid rgba(217, 119, 87, 0.55);
+    box-shadow:
+      0 14px 34px rgba(0, 0, 0, 0.52),
+      0 2px 10px rgba(0, 0, 0, 0.42),
+      0 0 14px rgba(217, 119, 87, 0.30),       /* outer orange neon halo */
+      inset 0 1px 0 rgba(255, 255, 255, 0.10), /* top edge highlight (3D) */
+      inset 0 0 18px rgba(217, 119, 87, 0.06); /* faint inner orange wash */
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    backdrop-filter: blur(12px) saturate(1.3);
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+    transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  #card.visible { opacity: 1; transform: translateY(0) scale(1); }
+  /* thin luminous orange top accent line — HUD feel */
+  #card::before {
+    content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(217, 119, 87, 0.9), transparent);
+  }
+  .head { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    background: radial-gradient(circle at 35% 30%, #ffcaa8, #d97757 70%);
+    box-shadow: 0 0 9px rgba(217, 119, 87, 0.95), 0 0 3px rgba(217, 119, 87, 0.8), inset 0 0 2px rgba(255, 255, 255, 0.6);
+  }
+  .title {
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em; color: #f0a888;
+    text-shadow: 0 0 8px rgba(217, 119, 87, 0.55);
+  }
+  .message { font-size: 13px; line-height: 1.45; color: #e8e0d8; margin-bottom: 9px; word-break: break-word; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  button {
+    font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+    border-radius: 8px; padding: 5px 13px; border: 1px solid transparent;
+    transition: transform 0.08s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  }
+  .snooze {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.18); color: #e8e0d8;
+  }
+  .snooze:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(217, 119, 87, 0.4); }
+  .confirm {
+    color: #fff;
+    background: linear-gradient(180deg, #e98a69 0%, #d97757 100%);
+    border-color: rgba(217, 119, 87, 0.6);
+    box-shadow: 0 0 12px rgba(217, 119, 87, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  }
+  .confirm:hover { filter: brightness(1.08); box-shadow: 0 0 16px rgba(217, 119, 87, 0.78), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+  button:active { transform: translateY(1px); }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div class="head"><span class="dot"></span><span class="title" id="title"></span></div>
+    <div class="message" id="message"></div>
+    <div class="actions">
+      <button class="snooze" id="snooze"></button>
+      <button class="confirm" id="confirm"></button>
+    </div>
+  </div>
+  <script>
+    const card = document.getElementById("card");
+    const titleEl = document.getElementById("title");
+    const messageEl = document.getElementById("message");
+    const confirmBtn = document.getElementById("confirm");
+    const snoozeBtn = document.getElementById("snooze");
+    let currentId = null;
+
+    function reportHeight() {
+      // +18 covers the card's 8px top/bottom margins plus a little room for the
+      // soft drop shadow / neon glow so the 3D effect isn't clipped by the window.
+      const h = Math.ceil(card.getBoundingClientRect().height) + 18;
+      if (window.healthBubbleAPI) window.healthBubbleAPI.reportHeight(h);
+    }
+
+    if (window.healthBubbleAPI) {
+      window.healthBubbleAPI.onShow((data) => {
+        currentId = data.id;
+        titleEl.textContent = data.title || "";
+        messageEl.textContent = data.message || "";
+        confirmBtn.textContent = data.confirmLabel || "OK";
+        snoozeBtn.textContent = data.snoozeLabel || "Later";
+        snoozeBtn.style.display = data.snoozeLabel ? "" : "none";
+        requestAnimationFrame(() => { card.classList.add("visible"); reportHeight(); });
+      });
+    }
+    confirmBtn.addEventListener("click", () => {
+      if (window.healthBubbleAPI && currentId) window.healthBubbleAPI.confirm(currentId);
+    });
+    snoozeBtn.addEventListener("click", () => {
+      if (window.healthBubbleAPI && currentId) window.healthBubbleAPI.snooze(currentId);
+    });
+    window.addEventListener("resize", reportHeight);
+  </script>
+</body>
+</html>

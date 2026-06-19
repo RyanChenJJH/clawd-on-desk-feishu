@@ -44,6 +44,26 @@ describe("doctor report redaction", () => {
     assert.ok(out.includes("[REDACTED]"));
   });
 
+  it("redacts Feishu app credentials and recipient identifiers", () => {
+    const out = redact([
+      "app_id=cli_testappid1234567890",
+      "app_secret=test-secret-value",
+      "receive_id=oc_testchat123456",
+      "open_id=ou_testopen123456",
+      "message_id=om_testmessage123456",
+      '{"appSecret":"json-secret","chatId":"oc_jsonchat123456"}',
+    ].join("\n"));
+
+    assert.ok(!out.includes("cli_testappid"));
+    assert.ok(!out.includes("test-secret-value"));
+    assert.ok(!out.includes("oc_testchat"));
+    assert.ok(!out.includes("ou_testopen"));
+    assert.ok(!out.includes("om_testmessage"));
+    assert.ok(!out.includes("json-secret"));
+    assert.ok(!out.includes("oc_jsonchat"));
+    assert.ok(out.includes("[REDACTED]"));
+  });
+
   it("redacts configured Clawd app roots without consuming the rest of the path", () => {
     const out = redact([
       "D:/animation/hooks/opencode-plugin",

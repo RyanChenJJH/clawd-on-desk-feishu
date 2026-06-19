@@ -1,6 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
-const { __test } = require("../src/doctor-ipc");
+const { registerDoctorIpc, __test } = require("../src/doctor-ipc");
 
 describe("Doctor IPC helpers", () => {
   it("single-flights concurrent doctor checks and resets after completion", async () => {
@@ -55,5 +55,38 @@ describe("Doctor IPC helpers", () => {
     assert.deepStrictEqual(__test.normalizeDoctorOpenLogPayload("bad"), {});
     assert.deepStrictEqual(__test.normalizeDoctorOpenLogPayload({ name: 123 }), {});
     assert.deepStrictEqual(__test.normalizeDoctorOpenLogPayload({ name: "clawd.log" }), { name: "clawd.log" });
+  });
+
+  it("passes Feishu approval status helpers into Doctor checks", async () => {
+    const handlers = new Map();
+    let captured = null;
+    registerDoctorIpc({
+      ipcMain: {
+        handle(name, fn) {
+          handlers.set(name, fn);
+        },
+      },
+      app: {
+        getAppPath: () => "E:\\app",
+        getPath: () => "E:\\user-data",
+        getVersion: () => "0.9.0",
+      },
+      shell: {},
+      server: {},
+      getPrefsSnapshot: () => ({ feishuApproval: { enabled: true } }),
+      getDoNotDisturb: () => false,
+      getLocale: () => "en",
+      getFeishuApprovalCredentialsStatus: () => ({ credentialsConfigured: true }),
+      getFeishuApprovalStatus: () => ({ status: "running" }),
+      runDoctorChecks: (options) => {
+        captured = options;
+        return { generatedAt: "now", overall: { status: "pass", issueCount: 0 }, checks: [] };
+      },
+    });
+
+    await handlers.get("doctor:run-checks")();
+
+    assert.deepStrictEqual(captured.feishuCredentialsStatus, { credentialsConfigured: true });
+    assert.deepStrictEqual(captured.feishuApprovalStatus, { status: "running" });
   });
 });

@@ -2,11 +2,47 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const Module = require("node:module");
 
-const initPermission = require("../src/permission");
+const PERMISSION_MODULE_PATH = require.resolve("../src/permission");
+
+function loadPermissionWithElectronMock() {
+  delete require.cache[PERMISSION_MODULE_PATH];
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === "electron") {
+      return {
+        BrowserWindow: Object.assign(class {}, { fromWebContents() { return null; } }),
+        globalShortcut: {
+          register() { return true; },
+          unregister() {},
+          isRegistered() { return false; },
+        },
+      };
+    }
+    return originalLoad.apply(this, arguments);
+  };
+  try {
+    return require("../src/permission");
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+const initPermission = loadPermissionWithElectronMock();
 
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function createMockResponse() {
@@ -227,6 +263,51 @@ describe("permission telegram remote approval", () => {
     assert.equal(entry.res.captured.ended, false);
   });
 
+  it("uses generic remote clients and lets the first Telegram or Feishu decision win", async () => {
+    const telegramDecision = deferred();
+    const feishuDecision = deferred();
+    const calls = [];
+    const telegram = {
+      id: "telegram",
+      isEnabled: () => true,
+      requestApproval: (_payload, options) => {
+        calls.push({ id: "telegram", signal: options.signal });
+        return telegramDecision.promise;
+      },
+    };
+    const feishu = {
+      id: "feishu",
+      isEnabled: () => true,
+      requestApproval: (_payload, options) => {
+        calls.push({ id: "feishu", signal: options.signal });
+        return feishuDecision.promise;
+      },
+    };
+    const perm = initPermission(makeCtx({
+      getRemoteApprovalClients: () => [telegram, feishu],
+      getTelegramApprovalClient: () => {
+        throw new Error("legacy Telegram fallback should not run");
+      },
+    }));
+    const entry = makePermEntry();
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteApproval(entry), true);
+    assert.deepEqual(calls.map((call) => call.id), ["telegram", "feishu"]);
+
+    feishuDecision.resolve({ action: "deny" });
+    await flush();
+    telegramDecision.resolve("allow");
+    await flush();
+    await flush();
+
+    assert.equal(perm.pendingPermissions.length, 0);
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(calls[1].signal.aborted, true);
+    const body = JSON.parse(entry.res.captured.body);
+    assert.deepEqual(body.hookSpecificOutput.decision, { behavior: "deny" });
+  });
+
   it("does not expose or accept rich suggestions for unsupported agents", async () => {
     const requests = [];
     const client = {
@@ -318,6 +399,9 @@ describe("permission telegram remote approval", () => {
     perm.resolvePermissionEntry(entry, "deny");
 
     assert.equal(signal.aborted, true);
+    // v3: the remote card must be told it was resolved elsewhere (so it shows
+    // "Resolved on desktop or terminal", not a misleading "Expired").
+    assert.equal(signal.reason, "answered_elsewhere");
     assert.equal(perm.pendingPermissions.length, 0);
     const body = JSON.parse(entry.res.captured.body);
     assert.deepEqual(body.hookSpecificOutput.decision, { behavior: "deny" });
@@ -339,6 +423,7 @@ describe("permission telegram remote approval", () => {
       makePermEntry({ isKimiNotify: true }),
       makePermEntry({ isOpencode: true }),
       makePermEntry({ isAntigravity: true, agentId: "antigravity-cli" }),
+      makePermEntry({ isCopilotCli: true, agentId: "copilot-cli" }),
       makePermEntry({ toolName: "ExitPlanMode" }),
       makePermEntry({ toolName: "AskUserQuestion" }),
       makePermEntry({ toolName: "TaskList" }),
@@ -410,6 +495,123 @@ describe("permission telegram remote approval", () => {
     perm.dismissPermissionForTerminal(entry);
 
     assert.equal(signal.aborted, true);
+    assert.equal(signal.reason, "answered_elsewhere");
     assert.equal(perm.pendingPermissions.indexOf(entry), -1);
+  });
+
+  // v3.2-P2B: phantom-card guard. An approval that was auto-approved / already
+  // resolved is removed from pendingPermissions before the route calls
+  // maybeStartRemoteApproval, so no remote card must fire for a closed request.
+  // This is the root cause of the old "I hadn't clicked yet and it auto-resolved
+  // / went Expired" phantom.
+  it("does not start remote approval for an already-resolved entry (no phantom card)", () => {
+    const requests = [];
+    const client = {
+      isEnabled: () => true,
+      requestApproval: (payload) => { requests.push(payload); return new Promise(() => {}); },
+    };
+    const perm = initPermission(makeCtx({ getTelegramApprovalClient: () => client }));
+    const entry = makePermEntry();
+    // Intentionally NOT pushed to pendingPermissions — mirrors an entry that
+    // auto-pilot already resolved inside showPermissionBubble.
+    assert.equal(perm.pendingPermissions.indexOf(entry), -1);
+    assert.equal(perm.maybeStartRemoteApproval(entry), false);
+    assert.deepEqual(requests, []);
+  });
+
+  // v3.2-P2B: there is no agent allowlist on the plain allow/deny card — every
+  // agent that uses the standard held-connection approval transport reaches the
+  // remote provider. (Rich SUGGESTION buttons are gated separately by
+  // isRemoteRichApprovalSupported; the approval card itself is not.)
+  it("starts remote approval for any standard agent's genuine approval", () => {
+    const client = {
+      isEnabled: () => true,
+      requestApproval: () => new Promise(() => {}),
+    };
+    const perm = initPermission(makeCtx({ getTelegramApprovalClient: () => client }));
+    for (const agentId of ["claude-code", "codex", "qwen-code", "some-future-agent"]) {
+      const entry = makePermEntry({ agentId });
+      perm.pendingPermissions.push(entry);
+      assert.equal(perm.maybeStartRemoteApproval(entry), true, agentId);
+    }
+  });
+});
+
+describe("permission feishu remote elicitation (v3)", () => {
+  function makeElicitEntry(overrides = {}) {
+    return makePermEntry({
+      isElicitation: true,
+      toolName: "AskUserQuestion",
+      toolInput: { questions: [{ question: "Pick a color", options: ["Red", "Blue"] }] },
+      ...overrides,
+    });
+  }
+
+  it("answers AskUserQuestion via a remote elicitation client and resolves with the answer", async () => {
+    let resolveElicit;
+    const requests = [];
+    const client = {
+      id: "feishu",
+      isEnabled: () => true,
+      requestElicitation: (payload, options) => {
+        requests.push({ payload, options });
+        return new Promise((resolve) => { resolveElicit = resolve; });
+      },
+    };
+    const perm = initPermission(makeCtx({ getRemoteElicitationClients: () => [client] }));
+    const entry = makeElicitEntry();
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteElicitation(entry), true);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].payload.questions, [{ question: "Pick a color", options: ["Red", "Blue"] }]);
+    assert.equal(requests[0].options.signal.aborted, false);
+
+    resolveElicit({ action: "answer", answers: { "Pick a color": "Blue" } });
+    await flush();
+    await flush();
+
+    assert.equal(perm.pendingPermissions.indexOf(entry), -1);
+    assert.deepEqual(entry.resolvedUpdatedInput.answers, { "Pick a color": "Blue" });
+  });
+
+  it("does not start remote elicitation for non-elicitation / non-AskUserQuestion / empty-question entries", () => {
+    const requests = [];
+    const client = {
+      id: "feishu",
+      isEnabled: () => true,
+      requestElicitation: (payload) => { requests.push(payload); return new Promise(() => {}); },
+    };
+    const perm = initPermission(makeCtx({ getRemoteElicitationClients: () => [client] }));
+    const entries = [
+      makeElicitEntry({ isElicitation: false }),
+      makeElicitEntry({ toolName: "Bash" }),
+      makeElicitEntry({ toolInput: { questions: [] } }),
+    ];
+    for (const entry of entries) {
+      perm.pendingPermissions.push(entry);
+      assert.equal(perm.maybeStartRemoteElicitation(entry), false);
+    }
+    assert.deepEqual(requests, []);
+  });
+
+  it("aborts the remote elicitation with 'answered_elsewhere' when resolved locally first", () => {
+    let signal;
+    const client = {
+      id: "feishu",
+      isEnabled: () => true,
+      requestElicitation: (_payload, options) => { signal = options.signal; return new Promise(() => {}); },
+    };
+    const perm = initPermission(makeCtx({ getRemoteElicitationClients: () => [client] }));
+    const entry = makeElicitEntry();
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteElicitation(entry), true);
+    assert.equal(signal.aborted, false);
+
+    perm.resolvePermissionEntry(entry, "allow");
+
+    assert.equal(signal.aborted, true);
+    assert.equal(signal.reason, "answered_elsewhere");
   });
 });

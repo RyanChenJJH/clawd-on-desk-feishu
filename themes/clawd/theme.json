@@ -229,6 +229,18 @@
       "duration": 3500
     }
   },
+  "healthReminders": {
+    "drink": { "file": "clawd-health-drink.svg", "duration": 4000 },
+    "stretch": { "file": "clawd-health-stretch.svg", "duration": 4500 },
+    "eat": { "file": "clawd-health-eat.svg", "duration": 4000 },
+    "offwork": { "file": "clawd-health-offwork.svg", "duration": 4000 },
+    "eyerest": { "file": "clawd-health-eyerest.svg", "duration": 5000 },
+    "breathe": { "file": "clawd-health-breathe.svg", "duration": 5000 },
+    "posture": { "file": "clawd-health-posture.svg", "duration": 4000 },
+    "walk": { "file": "clawd-health-walk.svg", "duration": 4000 },
+    "snack": { "file": "clawd-health-snack.svg", "duration": 4000 },
+    "sleeptime": { "file": "clawd-health-sleeptime.svg", "duration": 5000 }
+  },
   "miniMode": {
     "supported": true,
     "offsetRatio": 0.486,

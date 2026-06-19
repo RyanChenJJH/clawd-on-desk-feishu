@@ -255,6 +255,18 @@
       "file": "cloudling-react-drag.svg"
     }
   },
+  "healthReminders": {
+    "drink": { "file": "cloudling-attention.svg", "duration": 4000 },
+    "stretch": { "file": "cloudling-conducting.svg", "duration": 4500 },
+    "eat": { "file": "cloudling-carrying.svg", "duration": 4000 },
+    "offwork": { "file": "cloudling-idle.svg", "duration": 4000 },
+    "eyerest": { "file": "cloudling-thinking.svg", "duration": 5000 },
+    "breathe": { "file": "cloudling-dozing.svg", "duration": 5000 },
+    "posture": { "file": "cloudling-attention.svg", "duration": 4000 },
+    "walk": { "file": "cloudling-sweeping.svg", "duration": 4000 },
+    "snack": { "file": "cloudling-carrying.svg", "duration": 4000 },
+    "sleeptime": { "file": "cloudling-sleeping.svg", "duration": 5000 }
+  },
   "miniMode": {
     "supported": true,
     "offsetRatio": 0.486,

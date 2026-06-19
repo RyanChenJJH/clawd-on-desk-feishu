@@ -30,6 +30,7 @@ const SIDEBAR_TAB_IDS = [
   "telegram-approval",
   "remote-ssh",
   "mobile",
+  "healthReminder",
   "about",
 ];
 

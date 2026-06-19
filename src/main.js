@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell, nativeImage, powerSaveBlocker, clipboard } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, dialog, shell, nativeImage, powerSaveBlocker, powerMonitor, clipboard } = require("electron");
 // ── Linux/Wayland: relaunch under XWayland so the pet is draggable (issue #441) ──
 // Native Wayland ignores client-side window positioning and blocks global cursor
 // queries, so the pet spawns centered, can't be dragged, and has no tracking;
@@ -88,6 +88,23 @@ const initPermission = require("./permission");
 const { registerPermissionIpc } = initPermission;
 const { createTelegramApprovalSidecar } = require("./telegram-approval-sidecar");
 const telegramApprovalSettings = require("./telegram-approval-settings");
+const feishuApprovalSettings = require("./feishu-approval-settings");
+const { createFeishuApprovalMain } = require("./feishu-approval-main");
+const {
+  createRemoteApprovalProviderRegistry,
+} = require("./remote-approval/provider-registry");
+const {
+  createTelegramApprovalProvider,
+} = require("./remote-approval/providers/telegram-provider");
+const {
+  createFeishuApprovalProvider,
+} = require("./remote-approval/providers/feishu-provider");
+const {
+  createRemoteApprovalCompletionNotifier,
+} = require("./remote-approval/completion-notifier");
+const {
+  summarizeRemoteApprovalStatus,
+} = require("./remote-approval/status");
 const {
   buildTelegramApprovalStatus,
   isNativeTelegramApprovalSelected,
@@ -295,9 +312,11 @@ let telegramApprovalSidecar = null;
 let telegramApprovalSyncPromise = Promise.resolve();
 let telegramApprovalConfigSignature = "";
 let telegramApprovalTokenRevision = 0;
+let feishuApprovalRuntime = null;
 let _telegramMigrationController = null;
 let telegramNativeRunner = null;
 let telegramCompanion = null;
+let feishuCompanion = null;
 let telegramDirectSend = null;
 let suppressTelegramApprovalSidecarSync = 0;
 let hardwareBuddyAdapter = null;
@@ -350,6 +369,20 @@ const _settingsController = createSettingsController({
     getTelegramApprovalTokenInfo: () => getTelegramApprovalTokenInfo(),
     sendTelegramApprovalTest: () => sendTelegramApprovalTest(),
     deleteTelegramApprovalTokenFile: () => deleteTelegramApprovalTokenFile(),
+    writeFeishuApprovalCredentials: (credentials) => writeFeishuApprovalCredentials(credentials),
+    deleteFeishuApprovalCredentialsFile: () => deleteFeishuApprovalCredentialsFile(),
+    getFeishuApprovalStatus: () => getFeishuApprovalStatus(),
+    getFeishuApprovalCredentialsInfo: () => getFeishuApprovalCredentialsInfo(),
+    sendFeishuApprovalTest: () => sendFeishuApprovalTest(),
+    // Health Reminder (fork extension): "test once" triggers the runtime to fire
+    // a reminder immediately. Forward-reference — runtime is created below.
+    triggerHealthReminderTest: (id) => _healthReminderRuntime
+      ? _healthReminderRuntime.triggerTest(id)
+      : { status: "error", message: "health reminder runtime not ready" },
+    dismissAllHealthReminders: () => {
+      if (_healthReminderRuntime) _healthReminderRuntime.dismissAllOpen();
+      return { status: "ok" };
+    },
     // Lazy getter so settings-actions can use the controller even though it's
     // instantiated below (forward-reference).
     get telegramMigration() {
@@ -1209,8 +1242,22 @@ const _permCtx = {
   clearShortcutFailure: (actionId) => shortcutRuntime.clearFailure(actionId),
   repositionUpdateBubble: () => repositionUpdateBubble(),
   getTelegramApprovalClient: () => getTelegramApprovalClient(),
+  getRemoteApprovalClients: () => getRemoteApprovalClients(),
+  getRemoteElicitationClients: () => getRemoteElicitationClients(),
   onPermissionsChanged: () => {
     if (hardwareBuddyAdapter) hardwareBuddyAdapter.notifyPermissionsChanged();
+    // V3 task priority: drive health-bubble yield/restore on the 0<->>0 edge of
+    // pending task bubbles (edge-triggered, so it never thrashes on every change).
+    try {
+      const active = pendingPermissions.length > 0;
+      if (active !== _lastTaskBubbleActive) {
+        _lastTaskBubbleActive = active;
+        if (_healthReminderRuntime) {
+          if (active) _healthReminderRuntime.onTaskActive();
+          else _healthReminderRuntime.onTaskCleared();
+        }
+      }
+    } catch { /* ignore */ }
   },
   onPermissionResolved: (permEntry, options = {}) => {
     if (!_state || typeof _state.clearPermissionNotification !== "function") return;
@@ -1218,7 +1265,7 @@ const _permCtx = {
   },
 };
 const _perm = initPermission(_permCtx);
-const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
+const { showPermissionBubble, resolvePermissionEntry, sendPermissionResponse, repositionBubbles, permLog, PASSTHROUGH_TOOLS, addPendingPermission, removePendingPermission, maybeStartRemoteApproval, maybeStartRemoteElicitation, showCodexNotifyBubble, clearCodexNotifyBubbles, showKimiNotifyBubble, clearKimiNotifyBubbles, syncPermissionShortcuts, replyOpencodePermission } = _perm;
 const pendingPermissions = _perm.pendingPermissions;
 let permDebugLog = null; // set after app.whenReady()
 let updateDebugLog = null; // set after app.whenReady()
@@ -1360,6 +1407,10 @@ const _stateCtx = {
     if (telegramCompanion) {
       try { telegramCompanion.onSnapshot(snapshot); } catch {}
     }
+    if (!feishuCompanion) initFeishuCompletionCompanion();
+    if (feishuCompanion) {
+      try { feishuCompanion.onSnapshot(snapshot); } catch {}
+    }
     if (_lanWss) { try { _lanWss.onSnapshot(); } catch {} }
   },
   // Phase 3b: 读 prefs.themeOverrides 判断某个 oneshot state 是否被用户禁用。
@@ -1404,6 +1455,121 @@ const { setState, applyState, updateSession, resolveDisplayState, getSvgOverride
         startWakePoll, stopWakePoll, detectRunningAgentProcesses,
         startStartupRecovery: _startStartupRecovery } = _state;
 const sessions = _state.sessions;
+
+// ── Health Reminder runtime (fork extension) ──
+// Independent, persistent bubble that stacks BELOW the task bubble (so task and
+// health reminders never interrupt each other); the body animation only plays
+// while the pet is idle. Entirely guarded so a failure here never affects
+// startup or any existing feature. Default-off → effectively dormant until the
+// user enables it in Settings.
+let _healthReminderRuntime = null;
+let _healthBubbleController = null;
+let _lastTaskBubbleActive = false; // V3: tracks the 0<->>0 task-bubble edge for health priority
+let _healthReminderPollTimer = null;
+let _lastHealthConfigSig = "";
+const HEALTH_BUBBLE_LABELS = {
+  en: { confirm: "Got it", snooze: "Later" },
+  zh: { confirm: "知道了", snooze: "稍后" },
+  "zh-TW": { confirm: "知道了", snooze: "稍後" },
+  ko: { confirm: "확인", snooze: "나중에" },
+  ja: { confirm: "了解", snooze: "あとで" },
+};
+try {
+  const createHealthReminderRuntime = require("./health-reminder-main");
+  const createHealthBubbleController = require("./health-reminder-bubble");
+
+  _healthBubbleController = createHealthBubbleController({
+    BrowserWindow,
+    // v3: global display mode (followPet default / corner). displayMode lands in
+    // config in V3-P3; until then this safely defaults to followPet.
+    getMode: () => {
+      try { return _settingsController.get("healthReminder").displayMode === "corner" ? "corner" : "followPet"; }
+      catch { return "followPet"; }
+    },
+    // v3: target display's work area (so the stack never leaves the screen).
+    getWorkArea: () => {
+      try {
+        if (win && !win.isDestroyed()) {
+          const b = win.getBounds();
+          return getNearestWorkArea(b.x + b.width / 2, b.y + b.height / 2);
+        }
+      } catch { /* window not ready */ }
+      return undefined;
+    },
+    // v3: pet hit-rect in screen coords so followPet placement avoids the pet.
+    getPetHitRect: () => {
+      try {
+        if (win && !win.isDestroyed()) return getHitRectScreen(win.getBounds());
+      } catch { /* window not ready */ }
+      return null;
+    },
+    getLabels: () => HEALTH_BUBBLE_LABELS[_settingsController.get("lang")] || HEALTH_BUBBLE_LABELS.en,
+    getMaxVisible: () => {
+      try { return _settingsController.get("healthReminder").maxVisibleBubbles; } catch { return 3; }
+    },
+  });
+
+  const resolveHealthAnimation = (reminder) => {
+    if (!reminder || !reminder.animationKey || reminder.animationKey === "none") return null;
+    const theme = getActiveTheme();
+    const entry = theme && theme.healthReminders && theme.healthReminders[reminder.animationKey];
+    if (!entry) return null;
+    const file = (Array.isArray(entry.files) && entry.files[0]) || entry.file || null;
+    if (!file) return null;
+    return { file, duration: Number.isFinite(entry.duration) ? entry.duration : 4000 };
+  };
+
+  _healthReminderRuntime = createHealthReminderRuntime({
+    getConfig: () => _settingsController.get("healthReminder"),
+    getDisplayState: () => _state.getCurrentState(),
+    isDnd: () => doNotDisturb,
+    showBubble: (reminder) => { try { _healthBubbleController.show(reminder); } catch (e) { console.warn("Clawd: health bubble show failed:", e && e.message); } },
+    dismissBubble: (id) => { try { _healthBubbleController.dismiss(id); } catch { /* ignore */ } },
+    playBodyAnimation: (reminder) => {
+      const anim = resolveHealthAnimation(reminder);
+      if (anim) sendToRenderer("play-health-reminder", anim.file, anim.duration);
+    },
+    // playSound itself honours global mute / DND / cooldown.
+    playSound: (name) => { try { playSound(name); } catch { /* ignore */ } },
+    // onlyWhenActive (opt-in): "active" = OS input within the last 2 min.
+    isUserActive: () => {
+      try { return powerMonitor.getSystemIdleTime() < 120; } catch { return true; }
+    },
+    // Opt-in local stats: forward to the command (a no-op when stats are off).
+    recordStat: (type, id) => {
+      try { _settingsController.applyCommand("healthReminder.recordStat", { type, id }); } catch { /* ignore */ }
+    },
+    // V3 task priority: a pending permission/task bubble means health reminders
+    // must yield. onPermissionsChanged (below) drives the active/cleared edges.
+    hasActiveTaskBubble: () => {
+      try { return pendingPermissions.length > 0; } catch { return false; }
+    },
+  });
+
+  ipcMain.on("health-bubble:confirm", (_e, id) => { if (_healthReminderRuntime) _healthReminderRuntime.handleConfirm(id); });
+  ipcMain.on("health-bubble:snooze", (_e, id) => { if (_healthReminderRuntime) _healthReminderRuntime.handleSnooze(id); });
+  ipcMain.on("health-bubble:dismiss-all", () => { if (_healthReminderRuntime) _healthReminderRuntime.dismissAllOpen(); });
+
+  // Lightweight poll: (1) replay a deferred body animation when the pet goes
+  // busy -> idle, (2) pick up Settings changes (enable / edit) without a restart.
+  // ~2s latency is fine for a wellness nudge; the body is a no-op string compare.
+  _healthReminderPollTimer = setInterval(() => {
+    if (!_healthReminderRuntime) return;
+    try { _healthReminderRuntime.notifyDisplayState(_state.getCurrentState()); } catch { /* ignore */ }
+    try {
+      const cfg = _settingsController.get("healthReminder") || {};
+      const sig = JSON.stringify({ e: cfg.enabled, d: cfg.respectDnd, q: cfg.quietHours, r: cfg.reminders });
+      if (sig !== _lastHealthConfigSig) {
+        _lastHealthConfigSig = sig;
+        if (cfg.enabled) { _healthReminderRuntime.start(); _healthReminderRuntime.refresh(); }
+        else { _healthReminderRuntime.stop(); _healthBubbleController.dismissAll(); }
+      }
+    } catch { /* ignore */ }
+  }, 2000);
+  if (_healthReminderPollTimer && _healthReminderPollTimer.unref) _healthReminderPollTimer.unref();
+} catch (err) {
+  console.warn("Clawd: health reminder runtime init failed:", err && err.message);
+}
 
 // ── Keep-awake: block OS sleep while any agent task is in progress ──
 // State→in-progress mapping lives in state-session-snapshot.isSessionInProgress
@@ -1648,6 +1814,7 @@ const _serverCtx = {
   removePendingPermission,
   showPermissionBubble,
   maybeStartRemoteApproval,
+  maybeStartRemoteElicitation,
   replyOpencodePermission,
   permLog,
 };
@@ -1712,6 +1879,54 @@ function getTelegramApprovalClient() {
   return telegramApprovalSidecar.getClient();
 }
 
+function getFeishuApprovalClient() {
+  initFeishuApprovalRuntime();
+  if (!feishuApprovalRuntime || typeof feishuApprovalRuntime.getClient !== "function") return null;
+  return feishuApprovalRuntime.getClient();
+}
+
+function getRemoteApprovalClients() {
+  return createRemoteApprovalProviderRegistry({
+    providers: [
+      createTelegramApprovalProvider({ getClient: getTelegramApprovalClient }),
+      createFeishuApprovalProvider({ getClient: getFeishuApprovalClient }),
+    ],
+  }).listApprovalProviders();
+}
+
+// v3: elicitation-capable clients for answering AskUserQuestion in Feishu.
+// Gated by feishuApproval.elicitationEnabled (default off). Feishu only for now.
+function getRemoteElicitationClients() {
+  try {
+    if (getFeishuApprovalPrefs().elicitationEnabled !== true) return [];
+    const client = getFeishuApprovalClient();
+    return client && typeof client.requestElicitation === "function" ? [client] : [];
+  } catch (err) {
+    feishuApprovalLog("warn", "getRemoteElicitationClients failed", { error: err && err.message });
+    return [];
+  }
+}
+
+function buildFeishuStatusCommandSummary() {
+  const registry = createRemoteApprovalProviderRegistry({
+    providers: [
+      {
+        ...createTelegramApprovalProvider({ getClient: getTelegramApprovalClient }),
+        getStatus: () => getTelegramApprovalStatus(),
+      },
+      {
+        ...createFeishuApprovalProvider({ getClient: getFeishuApprovalClient }),
+        getStatus: () => getFeishuApprovalStatus(),
+      },
+    ],
+  });
+  return summarizeRemoteApprovalStatus({
+    pendingApprovalCount: getPendingTelegramApprovalCount(),
+    doNotDisturb,
+    providers: registry.getStatus(),
+  });
+}
+
 // R1a companion notifications are native-only: the legacy sidecar has no
 // sendNotification surface, so legacy users silently lack completion pings
 // (Settings copy must say so — tracked for a follow-up UI pass). Unlike
@@ -1742,8 +1957,178 @@ function telegramApprovalLog(level, message, meta = {}) {
   permLog(parts.filter(Boolean).join(" | "));
 }
 
+function feishuApprovalLog(level, message, meta = {}) {
+  const parts = [`feishu approval ${level}: ${message}`];
+  if (meta && meta.error) parts.push(String(meta.error).trim());
+  for (const key of ["errorClass", "errorCode", "status", "reason", "connectionStatus", "pendingApprovalCount"]) {
+    const value = meta && meta[key];
+    if (value !== undefined && value !== null && value !== "") {
+      parts.push(`${key}=${String(value).trim()}`);
+    }
+  }
+  permLog(parts.filter(Boolean).join(" | "));
+}
+
 function getTelegramApprovalPrefs() {
   return telegramApprovalSettings.normalizeTelegramApproval(_settingsController.get("tgApproval"));
+}
+
+function getFeishuApprovalPrefs() {
+  return feishuApprovalSettings.normalizeFeishuApproval(_settingsController.get("feishuApproval"));
+}
+
+function getFeishuApprovalPaths() {
+  const userDataDir = app.getPath("userData");
+  return {
+    userDataDir,
+    credentialsEnvFilePath: feishuApprovalSettings.defaultCredentialsEnvFilePath(userDataDir),
+  };
+}
+
+function getFeishuApprovalCredentialsStatus() {
+  const paths = getFeishuApprovalPaths();
+  return feishuApprovalSettings.credentialsStatus({
+    fs,
+    filePath: paths.credentialsEnvFilePath,
+  });
+}
+
+function getFeishuApprovalCredentialsInfo() {
+  const paths = getFeishuApprovalPaths();
+  return feishuApprovalSettings.readCredentialsInfo({
+    fs,
+    filePath: paths.credentialsEnvFilePath,
+  });
+}
+
+function getFeishuApprovalCredentials() {
+  const paths = getFeishuApprovalPaths();
+  return feishuApprovalSettings.readCredentialsEnvFile({
+    fs,
+    filePath: paths.credentialsEnvFilePath,
+  });
+}
+
+function initFeishuApprovalRuntime() {
+  if (feishuApprovalRuntime) return feishuApprovalRuntime;
+  feishuApprovalRuntime = createFeishuApprovalMain({
+    getConfig: () => getFeishuApprovalPrefs(),
+    getCredentials: () => getFeishuApprovalCredentials(),
+    getStatusSummary: () => buildFeishuStatusCommandSummary(),
+    log: feishuApprovalLog,
+  });
+  return feishuApprovalRuntime;
+}
+
+function initFeishuCompletionCompanion() {
+  if (feishuCompanion) return feishuCompanion;
+  feishuCompanion = createRemoteApprovalCompletionNotifier({
+    getClient: () => getFeishuApprovalClient(),
+    getLang: () => _settingsController.get("lang") || lang || "en",
+    getCompletionOutputMode: () => getFeishuApprovalPrefs().completionOutputMode || "off",
+    getNotifyOnComplete: () => getFeishuApprovalPrefs().notifyOnComplete === true,
+    isEnabled: () => {
+      const cfg = getFeishuApprovalPrefs();
+      const client = getFeishuApprovalClient();
+      return !!(cfg.enabled === true
+        && cfg.notifyOnComplete === true
+        && client
+        && typeof client.sendNotification === "function");
+    },
+    log: feishuApprovalLog,
+  });
+  return feishuCompanion;
+}
+
+function queueFeishuApprovalRuntimeSync(reason = "settings") {
+  const runtime = initFeishuApprovalRuntime();
+  if (!runtime || typeof runtime.queueSync !== "function") {
+    return Promise.resolve({ status: "skipped", reason: "not-initialized" });
+  }
+  return runtime.queueSync(reason).catch((err) => {
+    feishuApprovalLog("warn", "sync failed", { reason, error: err && err.message });
+    return { status: "error", message: err && err.message ? err.message : String(err) };
+  });
+}
+
+async function stopFeishuApprovalRuntime() {
+  if (!feishuApprovalRuntime || typeof feishuApprovalRuntime.stop !== "function") return;
+  try {
+    await feishuApprovalRuntime.stop();
+  } catch (err) {
+    feishuApprovalLog("warn", "stop failed", { error: err && err.message });
+  }
+}
+
+function getFeishuApprovalStatus() {
+  const runtime = initFeishuApprovalRuntime();
+  if (runtime && typeof runtime.getStatus === "function") {
+    const status = runtime.getStatus();
+    const credentials = getFeishuApprovalCredentialsStatus();
+    return {
+      ...status,
+      credentialsStored: credentials.credentialsStored === true,
+      credentialsFileMtimeMs: credentials.credentialsFileMtimeMs || 0,
+    };
+  }
+  const config = getFeishuApprovalPrefs();
+  const credentials = getFeishuApprovalCredentialsStatus();
+  const ready = feishuApprovalSettings.readiness(config, credentials);
+  return {
+    status: ready.ready ? "ready" : "stopped",
+    configured: ready.ready,
+    enabled: config.enabled === true,
+    reason: ready.reason || "",
+    message: ready.message || "",
+    region: config.region,
+    receiveIdType: config.receiveIdType,
+    credentialsStored: credentials.credentialsStored === true,
+    credentialsFileMtimeMs: credentials.credentialsFileMtimeMs || 0,
+  };
+}
+
+function writeFeishuApprovalCredentials(credentials) {
+  const paths = getFeishuApprovalPaths();
+  const result = feishuApprovalSettings.writeCredentialsEnvFile({
+    fs,
+    path,
+    filePath: paths.credentialsEnvFilePath,
+    appId: credentials && credentials.appId,
+    appSecret: credentials && credentials.appSecret,
+    platform: process.platform,
+  });
+  if (result && result.status === "ok") {
+    queueFeishuApprovalRuntimeSync("credentials");
+  }
+  return result;
+}
+
+async function deleteFeishuApprovalCredentialsFile() {
+  const paths = getFeishuApprovalPaths();
+  await stopFeishuApprovalRuntime();
+  try {
+    fs.unlinkSync(paths.credentialsEnvFilePath);
+    queueFeishuApprovalRuntimeSync("credentials-delete");
+    return { status: "ok", deleted: true };
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      queueFeishuApprovalRuntimeSync("credentials-delete");
+      return { status: "ok", deleted: false, noop: true };
+    }
+    return {
+      status: "error",
+      code: err && err.code ? err.code : "DELETE_FAILED",
+      message: `Feishu credentials file delete failed: ${err && err.message ? err.message : err}`,
+    };
+  }
+}
+
+async function sendFeishuApprovalTest() {
+  const runtime = initFeishuApprovalRuntime();
+  if (!runtime || typeof runtime.sendTest !== "function") {
+    return { status: "error", message: "Feishu approval runner is not available" };
+  }
+  return runtime.sendTest();
 }
 
 function getTelegramMigrationPrefs() {
@@ -2903,6 +3288,9 @@ _settingsController.subscribeKey("tgApproval", () => {
   if (suppressTelegramApprovalSidecarSync > 0) return;
   queueTelegramApprovalSidecarSync("settings");
 });
+_settingsController.subscribeKey("feishuApproval", () => {
+  queueFeishuApprovalRuntimeSync("settings");
+});
 _settingsController.subscribeKey("mobilePreviewEnabled", async (enabled) => {
   if (enabled) {
     if (!_lanWss) {
@@ -3001,6 +3389,8 @@ registerDoctorIpc({
   getPrefsSnapshot: () => _settingsController.getSnapshot(),
   getDoNotDisturb: () => doNotDisturb,
   getLocale: () => _settingsController.get("lang") || "en",
+  getFeishuApprovalCredentialsStatus: () => getFeishuApprovalCredentialsStatus(),
+  getFeishuApprovalStatus: () => getFeishuApprovalStatus(),
 });
 
 // ── Remote SSH (Phase 2) ──
@@ -3205,8 +3595,13 @@ function createWindow() {
   });
 
   // Event-level safety net for position sync
-  win.on("move", () => petWindowRuntime.syncFloatingWindowsAfterPetBoundsChange());
-  win.on("resize", () => petWindowRuntime.syncFloatingWindowsAfterPetBoundsChange());
+  const syncFloatingAndHealth = () => {
+    petWindowRuntime.syncFloatingWindowsAfterPetBoundsChange();
+    // v3: keep health bubbles glued to the pet / clamped on every move + resize.
+    try { if (_healthBubbleController) _healthBubbleController.reposition(); } catch { /* ignore */ }
+  };
+  win.on("move", syncFloatingAndHealth);
+  win.on("resize", syncFloatingAndHealth);
 
   syncSessionHudVisibility();
 
@@ -3545,6 +3940,8 @@ if (!gotTheLock) {
     initTelegramMigrationController().catch((err) => {
       console.warn("Clawd: migration controller init failed:", err && err.message);
     });
+    queueFeishuApprovalRuntimeSync("startup");
+    initFeishuCompletionCompanion();
     createWindow();
     // macOS: bridge the OS app-hidden state (⌘H / Dock right-click → 隐藏) to the
     // pet. Pet windows are setCanHide:NO, so the OS marks the app hidden but the
@@ -3609,6 +4006,7 @@ if (!gotTheLock) {
     globalShortcut.unregisterAll();
     void settingsSizePreviewSession.cleanup();
     stopTelegramApprovalSidecar();
+    void stopFeishuApprovalRuntime();
     if (typeof unsubscribeHardwareBuddySettings === "function") {
       unsubscribeHardwareBuddySettings();
       unsubscribeHardwareBuddySettings = null;
