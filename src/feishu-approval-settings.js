@@ -13,8 +13,9 @@ const DEFAULT_FEISHU_APPROVAL = Object.freeze({
   notifyOnComplete: false,
   completionOutputMode: "off",
   statusCommandEnabled: true,
-  // v3: answer AskUserQuestion in Feishu (default off, opt-in).
-  elicitationEnabled: false,
+  // v3: answer AskUserQuestion in Feishu. v4: default ON so consent-style
+  // prompts reach Feishu out of the box (Feishu-only; toggle in Settings).
+  elicitationEnabled: true,
 });
 
 const FEISHU_REGIONS = Object.freeze(["feishu", "lark"]);

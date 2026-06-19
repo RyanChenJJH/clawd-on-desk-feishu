@@ -31,6 +31,17 @@ function supportsRichApproval(client) {
   return !!(client.capabilities && client.capabilities.supportsRichApproval === true);
 }
 
+// v4 (Feishu all-tools coverage): a provider can require an explicit,
+// agent-supplied action summary. When set, the broker withholds payloads whose
+// summary was synthesized by Clawd (payload.summarySource === "synthesized").
+// Telegram keeps its conservative "no card without a real description"
+// behavior; Feishu (which does not set this) receives synthesized summaries.
+function requiresExplicitSummary(client) {
+  if (!client || typeof client !== "object") return false;
+  if (client.requiresExplicitSummary === true) return true;
+  return !!(client.capabilities && client.capabilities.requiresExplicitSummary === true);
+}
+
 function startRemoteApprovalFanout({
   clients,
   payload,
@@ -73,6 +84,10 @@ function startRemoteApprovalFanout({
   list.forEach((client, index) => {
     if (!isClientEnabled(client)) return;
     const id = providerId(client, index);
+    if (payload && payload.summarySource === "synthesized" && requiresExplicitSummary(client)) {
+      safeLog(`${id} skipped: provider requires an explicit action summary`);
+      return;
+    }
     const controller = createController();
     const options = controller ? { signal: controller.signal } : {};
     let request;
@@ -113,4 +128,5 @@ module.exports = {
   defaultNormalizeDecision,
   startRemoteApprovalFanout,
   supportsRichApproval,
+  requiresExplicitSummary,
 };

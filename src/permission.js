@@ -6,6 +6,9 @@ const { getDefaultShortcuts } = require("./shortcut-actions");
 const { keepOutOfTaskbar } = require("./taskbar");
 const { clampTextScale, scaleWidth, scaleHeight, applyZoomToWindow } = require("./text-scale");
 const { startRemoteApprovalFanout } = require("./remote-approval/broker");
+// fork (Feishu all-tools coverage): tool-aware safe summary fallback so tools
+// without description/summary/reason still reach summary-tolerant providers.
+const { buildToolApprovalSummary } = require("./remote-approval/tool-summary");
 const {
   createRemoteApprovalProviderRegistry,
 } = require("./remote-approval/provider-registry");
@@ -938,15 +941,23 @@ function buildRemoteSuggestionButtons(permEntry) {
 // to ship. Callers must treat null as a no-op signal — never send a card
 // without an action-describing summary.
 function buildRemoteApprovalPayload(permEntry) {
-  const summary = buildRemoteApprovalSummary(permEntry);
+  const session = ctx.sessions.get(permEntry.sessionId);
+  const cwd = (session && session.cwd) || permEntry.cwd || "";
+  // fork (Feishu all-tools coverage): if the agent supplied a description/
+  // summary/reason use it (source "explicit"); otherwise synthesize a safe,
+  // tool-aware summary (source "synthesized"). The broker withholds synthesized
+  // summaries from providers that require an explicit one (Telegram), so this
+  // broadens Feishu coverage WITHOUT changing Telegram behavior.
+  const explicitSummary = buildRemoteApprovalSummary(permEntry);
+  const { text: summary, source: summarySource } = buildToolApprovalSummary(permEntry, {
+    explicitSummary,
+    cwd,
+    redact: compactRemoteApprovalText,
+  });
   if (!summary) return null;
   const agentId = compactRemoteApprovalText(permEntry.agentId || "claude-code", 80) || "claude-code";
   const toolName = compactRemoteApprovalText(permEntry.toolName || "Unknown", 80) || "Unknown";
-  const session = ctx.sessions.get(permEntry.sessionId);
-  const sessionFolder = compactRemoteApprovalText(
-    basenameForDisplay((session && session.cwd) || permEntry.cwd || ""),
-    80
-  );
+  const sessionFolder = compactRemoteApprovalText(basenameForDisplay(cwd), 80);
   // Label is "Folder" (not "Session") on purpose: the pinned cc-connect-clawd
   // sidecar redacts any "<sensitive_key>: <value>" pair it recognises, and
   // "session" is in its keyword set — even though the value here is just the
@@ -961,6 +972,7 @@ function buildRemoteApprovalPayload(permEntry) {
   const payload = {
     title: `${agentId} requests ${toolName}`,
     detail,
+    summarySource,
   };
   if (suggestionButtons.length > 0) payload.suggestions = suggestionButtons;
   return payload;
