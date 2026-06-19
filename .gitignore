@@ -32,6 +32,11 @@ docs/**
 !docs/guides/codex-wsl-clarification.md
 !docs/guides/codex-wsl-clarification.zh-CN.md
 !docs/guides/codex-wsl-clarification.ko-KR.md
+!docs/guides/feishu-approval.md
+!docs/Expand_function/
+!docs/Expand_function/**
+!docs/Function_merge/
+!docs/Function_merge/**
 !docs/investigations/
 !docs/investigations/permission-hook-fail-deny-investigation.md
 !docs/investigations/codex-subagent-session-meta.md
