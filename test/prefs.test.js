@@ -83,7 +83,7 @@ describe("prefs.getDefaults", () => {
       notifyOnComplete: false,
       completionOutputMode: "off",
       statusCommandEnabled: true,
-      elicitationEnabled: false,
+      elicitationEnabled: true,
     });
   });
 
@@ -362,7 +362,7 @@ describe("prefs.validate", () => {
       notifyOnComplete: true,
       completionOutputMode: "full",
       statusCommandEnabled: false,
-      elicitationEnabled: false,
+      elicitationEnabled: true,
     });
     assert.strictEqual(Object.prototype.hasOwnProperty.call(v.feishuApproval, "appId"), false);
     assert.strictEqual(Object.prototype.hasOwnProperty.call(v.feishuApproval, "appSecret"), false);

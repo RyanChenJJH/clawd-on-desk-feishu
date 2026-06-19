@@ -45,7 +45,7 @@ test("normalizeFeishuApproval defaults off and trims first-version fields", () =
     notifyOnComplete: true,
     completionOutputMode: "full",
     statusCommandEnabled: false,
-    elicitationEnabled: false,
+    elicitationEnabled: true,
   });
   assert.equal(settings.normalizeFeishuApproval({}).statusCommandEnabled, true);
 });
@@ -58,10 +58,10 @@ test("normalizeFeishuApproval no longer emits approvalTimeoutSeconds (v3.2 remov
   assert.equal("approvalTimeoutSeconds" in settings.normalizeFeishuApproval({ approvalTimeoutSeconds: 120 }), false);
 });
 
-test("normalizeFeishuApproval defaults elicitationEnabled off and coerces booleans", () => {
-  assert.equal(settings.normalizeFeishuApproval({}).elicitationEnabled, false);
-  assert.equal(settings.normalizeFeishuApproval({ elicitationEnabled: true }).elicitationEnabled, true);
-  assert.equal(settings.normalizeFeishuApproval({ elicitationEnabled: "yes" }).elicitationEnabled, false);
+test("normalizeFeishuApproval defaults elicitationEnabled ON and coerces booleans", () => {
+  assert.equal(settings.normalizeFeishuApproval({}).elicitationEnabled, true);
+  assert.equal(settings.normalizeFeishuApproval({ elicitationEnabled: false }).elicitationEnabled, false);
+  assert.equal(settings.normalizeFeishuApproval({ elicitationEnabled: "yes" }).elicitationEnabled, true);
 });
 
 test("validateFeishuApproval rejects approvalTimeoutSeconds as an unsupported key (v3.2 removed)", () => {
