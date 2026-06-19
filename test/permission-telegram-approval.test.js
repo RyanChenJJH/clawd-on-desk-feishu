@@ -615,3 +615,72 @@ describe("permission feishu remote elicitation (v3)", () => {
     assert.equal(signal.reason, "answered_elsewhere");
   });
 });
+
+// v4 (Feishu all-tools coverage): tools without an agent-supplied
+// description/summary/reason now reach Feishu via a synthesized summary, while
+// strict providers (Telegram) still receive nothing for them.
+describe("permission feishu tool coverage (v4)", () => {
+  // Feishu-like (lenient) and Telegram-like (strict) clients exposed via
+  // ctx.getRemoteApprovalClients, mirroring main.getRemoteApprovalClients().
+  function makeClients() {
+    const feishu = {
+      id: "feishu",
+      calls: [],
+      capabilities: { supportsRichApproval: true, requiresExplicitSummary: false },
+      isEnabled: () => true,
+      requestApproval(payload) { this.calls.push(payload); return new Promise(() => {}); },
+    };
+    const telegram = {
+      id: "telegram",
+      calls: [],
+      capabilities: { supportsRichApproval: true, requiresExplicitSummary: true },
+      isEnabled: () => true,
+      requestApproval(payload) { this.calls.push(payload); return new Promise(() => {}); },
+    };
+    return { feishu, telegram };
+  }
+
+  it("sends a synthesized Feishu card for an Edit with no description", () => {
+    const { feishu } = makeClients();
+    const perm = initPermission(makeCtx({ getRemoteApprovalClients: () => [feishu] }));
+    const entry = makePermEntry({
+      toolName: "Edit",
+      toolInput: { file_path: "D:\\work\\project-alpha\\src\\auth.js", old_string: "a", new_string: "b" },
+    });
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteApproval(entry), true);
+    assert.equal(feishu.calls.length, 1);
+    assert.match(feishu.calls[0].detail, /Tool: Edit/);
+    assert.match(feishu.calls[0].detail, /Summary: Edit/);
+    assert.equal(feishu.calls[0].summarySource, "synthesized");
+    // never leaks file body
+    assert.equal(feishu.calls[0].detail.includes("new_string"), false);
+  });
+
+  it("withholds the synthesized Edit card from Telegram but sends it to Feishu", () => {
+    const { feishu, telegram } = makeClients();
+    const perm = initPermission(makeCtx({ getRemoteApprovalClients: () => [telegram, feishu] }));
+    const entry = makePermEntry({
+      toolName: "Edit",
+      toolInput: { file_path: "D:\\work\\project-alpha\\src\\auth.js" },
+    });
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteApproval(entry), true);
+    assert.equal(feishu.calls.length, 1);
+    assert.equal(telegram.calls.length, 0);
+  });
+
+  it("still sends an explicit-description tool to both channels", () => {
+    const { feishu, telegram } = makeClients();
+    const perm = initPermission(makeCtx({ getRemoteApprovalClients: () => [telegram, feishu] }));
+    const entry = makePermEntry({ toolName: "Bash", toolInput: { command: "ls", description: "List files" } });
+    perm.pendingPermissions.push(entry);
+
+    assert.equal(perm.maybeStartRemoteApproval(entry), true);
+    assert.equal(feishu.calls.length, 1);
+    assert.equal(telegram.calls.length, 1);
+    assert.equal(feishu.calls[0].summarySource, "explicit");
+  });
+});
